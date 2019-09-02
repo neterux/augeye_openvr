@@ -1,0 +1,8 @@
+bin/
+build/
+shared/
+thirdparty/
+CMakeLists.txt
+README.md
+EyeDetector/
+singleeyefitter/
