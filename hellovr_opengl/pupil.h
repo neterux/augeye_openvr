@@ -93,9 +93,6 @@ public:
     void Get(float *center_x, float *center_y, int *nEye);
     void Get(float* center_x, float* center_y, int nEye);
 
-    std::string addr = "172.16.10.200";
-    std::string req_port = "50020";
-
 private:
     zmq::context_t _ctx;
     zmq::socket_t _req;

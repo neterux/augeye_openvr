@@ -6,13 +6,13 @@ Pupil::Pupil()
     , _req(_ctx, ZMQ_REQ)
     , _sub(_ctx, ZMQ_SUB)
 {
-    _req.connect("tcp://172.16.10.200:50020");
+    _req.connect("tcp://172.16.200.27:50020");
     const std::string m_sub = "SUB_PORT";
     _req.send(zmq::buffer(m_sub));
     zmq::message_t sub_port;
     _req.recv(&sub_port);
     
-    _sub.connect("tcp://172.16.10.200:" + _decode(&sub_port));
+    _sub.connect("tcp://172.16.200.27:" + _decode(&sub_port));
     _sub.setsockopt(ZMQ_SUBSCRIBE, "pupil.", 6);
 }
 
