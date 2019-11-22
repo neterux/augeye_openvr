@@ -115,8 +115,9 @@ public:
 
 	void SetupScene();
 	void AddCubeToScene( Matrix4 mat, std::vector<float> &vertdata );
-	void AddCubeVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata );
-    void AddPlaneToScene( Matrix4 mat, std::vector<float>& vertdata );  // Add
+	void AddVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata );
+    void AddPlaneToScene(Matrix4 mat, std::vector<float>& vertdata);  // Add
+    void AddPlaneMeshToScene(std::vector<float>& vertdata);  // Add
 
 	void RenderControllerAxes();
 
@@ -127,7 +128,6 @@ public:
 	void RenderStereoTargets();
 	void RenderCompanionWindow();
 	void RenderScene( vr::Hmd_Eye nEye );
-    void UpdateScene( vr::Hmd_Eye nEye );  // Add
     void UpdateTexture( vr::Hmd_Eye nEye );  // Add
 
 	Matrix4 GetHMDMatrixProjectionEye( vr::Hmd_Eye nEye );
@@ -243,6 +243,7 @@ private: // OpenGL bookkeeping
 	GLuint m_unRenderModelProgramID;
 
 	GLint m_nSceneMatrixLocation;
+    GLint m_nImgTextureLocation;
 	GLint m_nControllerMatrixLocation;
 	GLint m_nRenderModelMatrixLocation;
 
@@ -274,7 +275,28 @@ private: // OpenGL bookkeeping
     /// for capturing vision image
     uEyeCamera m_vision[2];  // Handle uEyeCamera
 
-    /// for eye tracking
+    cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 1172.5f, 0.f, 1024.f, 0.f, 1172.5f, 1024.f, 0.f, 0.f, 1.f);
+    cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) << -0.02612325714, -0.2002757143, 0.0000088126, 0.00001278283571,
+            -0.006831787357, 0.3176116643, -0.28692775, -0.04330581357);
+    cv::Mat mapx, mapy;
+
+    Matrix4 stereoProjection[2] =
+    {
+        Matrix4(
+            1172.5f, 0.f, 1.02208907e+03f, 0.f,
+            0.f, 1172.5f, 1.12288197e+03f, 0.f,
+            0.f, 0.f, 1.f, 0.f,
+            0.f, 0.f, 0.f, 1.f
+        ),
+        Matrix4(
+            1172.5f, 0.f, 1.02208907e+03f, 0.f,
+            0.f, 1172.5f, 1.12288197e+03f, -4.60914960e+03f,
+            0.f, 0.f, 1.f, 0.f,
+            0.f, 0.f, 0.f, 1.f
+        )
+    };
+
+    //// for eye tracking
     //Pupil m_pupil;  // Handle Pupil eyetracker
 
     int m_eye;
@@ -408,7 +430,8 @@ CMainApplication::CMainApplication( int argc, char *argv[] )
 	, m_glControllerVertBuffer( 0 )
 	, m_unControllerVAO( 0 )
 	, m_unSceneVAO( 0 )
-	, m_nSceneMatrixLocation( -1 )
+    , m_nSceneMatrixLocation(-1)
+    , m_nImgTextureLocation(-1)
 	, m_nControllerMatrixLocation( -1 )
 	, m_nRenderModelMatrixLocation( -1 )
 	, m_iTrackedControllerCount( 0 )
@@ -750,6 +773,9 @@ void CMainApplication::Shutdown()
 		}
 	}
 
+    m_vision[vr::Eye_Left].~uEyeCamera();
+    m_vision[vr::Eye_Right].~uEyeCamera();
+
 	if( m_pCompanionWindow )
 	{
 		SDL_DestroyWindow(m_pCompanionWindow);
@@ -769,7 +795,7 @@ bool CMainApplication::HandleInput()
 
 	while ( SDL_PollEvent( &sdlEvent ) != 0 )
 	{
-		if ( sdlEvent.type == SDL_QUIT )
+		if ( sdlEvent.type == SDL_QUIT || sdlEvent.type == SDL_WINDOWEVENT_CLOSE )
 		{
 			bRet = true;
 		}
@@ -1155,6 +1181,14 @@ GLuint CMainApplication::CompileGLShader( const char *pchShaderName, const char 
 	if ( vShaderCompiled != GL_TRUE)
 	{
 		dprintf("%s - Unable to compile vertex shader %d!\n", pchShaderName, nSceneVertexShader);
+        GLsizei bufSize;
+        glGetShaderiv(nSceneVertexShader, GL_INFO_LOG_LENGTH, &bufSize);
+        {
+            std::vector<GLchar> infoLog(bufSize);
+            GLsizei length;
+            glGetShaderInfoLog(nSceneVertexShader, bufSize, &length, &infoLog[0]);
+            std::cerr << &infoLog[0] << std::endl;
+        }
 		glDeleteProgram( unProgramID );
 		glDeleteShader( nSceneVertexShader );
 		return 0;
@@ -1171,11 +1205,18 @@ GLuint CMainApplication::CompileGLShader( const char *pchShaderName, const char 
 	if (fShaderCompiled != GL_TRUE)
 	{
 		dprintf("%s - Unable to compile fragment shader %d!\n", pchShaderName, nSceneFragmentShader );
+        GLsizei bufSize;
+        glGetShaderiv(nSceneFragmentShader, GL_INFO_LOG_LENGTH, &bufSize);
+        {
+            std::vector<GLchar> infoLog(bufSize);
+            GLsizei length;
+            glGetShaderInfoLog(nSceneFragmentShader, bufSize, &length, &infoLog[0]);
+            std::cerr << &infoLog[0] << std::endl;
+        }
 		glDeleteProgram( unProgramID );
 		glDeleteShader( nSceneFragmentShader );
 		return 0;	
 	}
-
 	glAttachShader( unProgramID, nSceneFragmentShader );
 	glDeleteShader( nSceneFragmentShader ); // the program hangs onto this once it's attached
 
@@ -1202,63 +1243,73 @@ GLuint CMainApplication::CompileGLShader( const char *pchShaderName, const char 
 //-----------------------------------------------------------------------------
 bool CMainApplication::CreateAllShaders()
 {
-	m_unSceneProgramID = CompileGLShader( 
-		"Scene",
+    m_unSceneProgramID = CompileGLShader(
+        "Scene",
 
-		// Vertex Shader
-		"#version 410\n"
-		"uniform mat4 matrix;\n"
-		"layout(location = 0) in vec4 position;\n"
-		"layout(location = 1) in vec2 v2UVcoordsIn;\n"
-		"layout(location = 2) in vec3 v3NormalIn;\n"
-		"out vec2 v2UVcoords;\n"
-		"void main()\n"
-		"{\n"
-		"	v2UVcoords = v2UVcoordsIn;\n"
-		"	gl_Position = matrix * position;\n"
-		"}\n",
+        // vertex shader
+        "#version 410\n"
+        "uniform mat4 matrix;\n"
+        "layout(location = 0) in vec4 position;\n"
+        "layout(location = 1) in vec2 v2UVcoordsIn;\n"
+        "layout(location = 2) in vec3 v3NormalIn;\n"
+        "out vec2 v2UVcoords;\n"
+        "void main()\n"
+        "{\n"
+        "	v2UVcoords = v2UVcoordsIn;\n"
+        "	gl_Position = matrix * position;\n"
+        "}\n",
 
-		// Fragment Shader
-		"#version 410 core\n"
-		"uniform sampler2D mytexture;\n"
-		"in vec2 v2UVcoords;\n"
-		"out vec4 outputColor;\n"
-		"void main()\n"
-		"{\n"
-		"   outputColor = texture(mytexture, v2UVcoords);\n"
-		"}\n"
-		);
+        // Fragment Shader
+        "#version 410 core\n"
+        "uniform sampler2D img;\n"
+        "in vec2 v2UVcoords;\n"
+        "out vec4 outputColor;\n"
+        "void main()\n"
+        "{\n"
+        "   float a = radians(-90.f);\n"
+        "   mat2 rotate = mat2(cos(a), -sin(a), sin(a), cos(a));\n"
+        "   vec2 center = vec2(0.5f, 0.5f);\n"
+        "   vec2 rot_uv = rotate * (v2UVcoords - center) * vec2(1.0f, -1.0f) + center;\n"
+        "   outputColor = texture(img, rot_uv);\n"
+        "}\n"
+    );
 	m_nSceneMatrixLocation = glGetUniformLocation( m_unSceneProgramID, "matrix" );
 	if( m_nSceneMatrixLocation == -1 )
 	{
 		dprintf( "Unable to find matrix uniform in scene shader\n" );
 		return false;
 	}
+    m_nImgTextureLocation = glGetUniformLocation(m_unSceneProgramID, "img");
+    if (m_nImgTextureLocation == -1)
+    {
+        dprintf("Unable to find image texture uniform in scene shader\n");
+        return false;
+    }
 
-	m_unControllerTransformProgramID = CompileGLShader(
-		"Controller",
+    m_unControllerTransformProgramID = CompileGLShader(
+        "Controller",
 
-		// vertex shader
-		"#version 410\n"
-		"uniform mat4 matrix;\n"
-		"layout(location = 0) in vec4 position;\n"
-		"layout(location = 1) in vec3 v3ColorIn;\n"
-		"out vec4 v4Color;\n"
-		"void main()\n"
-		"{\n"
-		"	v4Color.xyz = v3ColorIn; v4Color.a = 1.0;\n"
-		"	gl_Position = matrix * position;\n"
-		"}\n",
+        // vertex shader
+        "#version 410\n"
+        "uniform mat4 matrix;\n"
+        "layout(location = 0) in vec4 position;\n"
+        "layout(location = 1) in vec3 v3ColorIn;\n"
+        "out vec4 v4Color;\n"
+        "void main()\n"
+        "{\n"
+        "	v4Color.xyz = v3ColorIn; v4Color.a = 1.0;\n"
+        "	gl_Position = matrix * position;\n"
+        "}\n",
 
-		// fragment shader
-		"#version 410\n"
-		"in vec4 v4Color;\n"
-		"out vec4 outputColor;\n"
-		"void main()\n"
-		"{\n"
-		"   outputColor = v4Color;\n"
-		"}\n"
-		);
+        // fragment shader
+        "#version 410\n"
+        "in vec4 v4Color;\n"
+        "out vec4 outputColor;\n"
+        "void main()\n"
+        "{\n"
+        "   outputColor = v4Color;\n"
+        "}\n"
+    );
 	m_nControllerMatrixLocation = glGetUniformLocation( m_unControllerTransformProgramID, "matrix" );
 	if( m_nControllerMatrixLocation == -1 )
 	{
@@ -1266,33 +1317,32 @@ bool CMainApplication::CreateAllShaders()
 		return false;
 	}
 
-	m_unRenderModelProgramID = CompileGLShader( 
-		"render model",
+    m_unRenderModelProgramID = CompileGLShader(
+        "render model",
 
-		// vertex shader
-		"#version 410\n"
-		"uniform mat4 matrix;\n"
-		"layout(location = 0) in vec4 position;\n"
-		"layout(location = 1) in vec3 v3NormalIn;\n"
-		"layout(location = 2) in vec2 v2TexCoordsIn;\n"
-		"out vec2 v2TexCoord;\n"
-		"void main()\n"
-		"{\n"
-		"	v2TexCoord = v2TexCoordsIn;\n"
-		"	gl_Position = matrix * vec4(position.xyz, 1);\n"
-		"}\n",
+        // vertex shader
+        "#version 410\n"
+        "uniform mat4 matrix;\n"
+        "layout(location = 0) in vec4 position;\n"
+        "layout(location = 1) in vec3 v3NormalIn;\n"
+        "layout(location = 2) in vec2 v2TexCoordsIn;\n"
+        "out vec2 v2TexCoord;\n"
+        "void main()\n"
+        "{\n"
+        "	v2TexCoord = v2TexCoordsIn;\n"
+        "	gl_Position = matrix * vec4(position.xyz, 1);\n"
+        "}\n",
 
-		//fragment shader
-		"#version 410 core\n"
-		"uniform sampler2D diffuse;\n"
-		"in vec2 v2TexCoord;\n"
-		"out vec4 outputColor;\n"
-		"void main()\n"
-		"{\n"
-		"   outputColor = texture( diffuse, v2TexCoord);\n"
-		"}\n"
-
-		);
+        //fragment shader
+        "#version 410 core\n"
+        "uniform sampler2D diffuse;\n"
+        "in vec2 v2TexCoord;\n"
+        "out vec4 outputColor;\n"
+        "void main()\n"
+        "{\n"
+        "   outputColor = texture(diffuse, v2TexCoord);\n"
+        "}\n"
+    );
 	m_nRenderModelMatrixLocation = glGetUniformLocation( m_unRenderModelProgramID, "matrix" );
 	if( m_nRenderModelMatrixLocation == -1 )
 	{
@@ -1300,30 +1350,30 @@ bool CMainApplication::CreateAllShaders()
 		return false;
 	}
 
-	m_unCompanionWindowProgramID = CompileGLShader(
-		"CompanionWindow",
+    m_unCompanionWindowProgramID = CompileGLShader(
+        "CompanionWindow",
 
-		// vertex shader
-		"#version 410 core\n"
-		"layout(location = 0) in vec4 position;\n"
-		"layout(location = 1) in vec2 v2UVIn;\n"
-		"noperspective out vec2 v2UV;\n"
-		"void main()\n"
-		"{\n"
-		"	v2UV = v2UVIn;\n"
-		"	gl_Position = position;\n"
-		"}\n",
+        // vertex shader
+        "#version 410 core\n"
+        "layout(location = 0) in vec4 position;\n"
+        "layout(location = 1) in vec2 v2UVIn;\n"
+        "noperspective out vec2 v2UV;\n"
+        "void main()\n"
+        "{\n"
+        "	v2UV = v2UVIn;\n"
+        "	gl_Position = position;\n"
+        "}\n",
 
-		// fragment shader
-		"#version 410 core\n"
-		"uniform sampler2D mytexture;\n"
-		"noperspective in vec2 v2UV;\n"
-		"out vec4 outputColor;\n"
-		"void main()\n"
-		"{\n"
-		"		outputColor = texture(mytexture, v2UV);\n"
-		"}\n"
-		);
+        // fragment shader
+        "#version 410 core\n"
+        "uniform sampler2D mytexture;\n"
+        "noperspective in vec2 v2UV;\n"
+        "out vec4 outputColor;\n"
+        "void main()\n"
+        "{\n"
+        "   outputColor = texture(mytexture, v2UV);\n"
+        "}\n"
+    );
 
 	return m_unSceneProgramID != 0 
 		&& m_unControllerTransformProgramID != 0
@@ -1346,23 +1396,19 @@ bool CMainApplication::SetupTexturemaps()
 
     // Left
     glBindTexture(GL_TEXTURE_2D, m_iTexture[vr::Eye_Left]);
-
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, nTextureWidth, nTextureHeight,
         0, GL_RGBA, GL_UNSIGNED_BYTE, m_vision[vr::Eye_Left].GetImagePtr());
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
     // Right
     glBindTexture(GL_TEXTURE_2D, m_iTexture[vr::Eye_Right]);
-
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, nTextureWidth, nTextureHeight,
         0, GL_RGBA, GL_UNSIGNED_BYTE, m_vision[vr::Eye_Right].GetImagePtr());
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	
@@ -1383,14 +1429,14 @@ void CMainApplication::SetupScene()
 
 	std::vector<float> vertdataarray;
 
-    // Change object scale
-	Matrix4 matScale;
-	matScale.scale( m_fScale, m_fScale, m_fScale );
-	
-	Matrix4 mat = matScale;
+    //// Change object scale
+	//Matrix4 matScale;
+	//matScale.scale( m_fScale, m_fScale, m_fScale );
+	//Matrix4 mat = matScale;
+    //AddPlaneToScene(mat, vertdataarray);
 
-    AddPlaneToScene(mat, vertdataarray);
-	m_uiVertcount = vertdataarray.size()/5;
+    AddPlaneMeshToScene(vertdataarray);
+	m_uiVertcount = vertdataarray.size() / 5;
 	
 	glGenVertexArrays( 1, &m_unSceneVAO );
 	glBindVertexArray( m_unSceneVAO );
@@ -1419,11 +1465,13 @@ void CMainApplication::SetupScene()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void CMainApplication::AddCubeVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata )
+void CMainApplication::AddVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata )
 {
+    // (x, y, z) = (f10, f11, f12)
 	vertdata.push_back( fl0 );
 	vertdata.push_back( fl1 );
 	vertdata.push_back( fl2 );
+    // (u, v) = (f13, f14)
 	vertdata.push_back( fl3 );
 	vertdata.push_back( fl4 );
 }
@@ -1446,72 +1494,112 @@ void CMainApplication::AddCubeToScene( Matrix4 mat, std::vector<float> &vertdata
 	Vector4 H = mat * Vector4( 0, 1, 1, 1 );
 
 	// triangles instead of quads
-	AddCubeVertex( E.x, E.y, E.z, 0, 1, vertdata ); //Front
-	AddCubeVertex( F.x, F.y, F.z, 1, 1, vertdata );
-	AddCubeVertex( G.x, G.y, G.z, 1, 0, vertdata );
-	AddCubeVertex( G.x, G.y, G.z, 1, 0, vertdata );
-	AddCubeVertex( H.x, H.y, H.z, 0, 0, vertdata );
-	AddCubeVertex( E.x, E.y, E.z, 0, 1, vertdata );
+	AddVertex( E.x, E.y, E.z, 0, 1, vertdata ); //Front
+	AddVertex( F.x, F.y, F.z, 1, 1, vertdata );
+	AddVertex( G.x, G.y, G.z, 1, 0, vertdata );
+	AddVertex( G.x, G.y, G.z, 1, 0, vertdata );
+	AddVertex( H.x, H.y, H.z, 0, 0, vertdata );
+	AddVertex( E.x, E.y, E.z, 0, 1, vertdata );
 					 
-	AddCubeVertex( B.x, B.y, B.z, 0, 1, vertdata ); //Back
-	AddCubeVertex( A.x, A.y, A.z, 1, 1, vertdata );
-	AddCubeVertex( D.x, D.y, D.z, 1, 0, vertdata );
-	AddCubeVertex( D.x, D.y, D.z, 1, 0, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 0, 0, vertdata );
-	AddCubeVertex( B.x, B.y, B.z, 0, 1, vertdata );
+	AddVertex( B.x, B.y, B.z, 0, 1, vertdata ); //Back
+	AddVertex( A.x, A.y, A.z, 1, 1, vertdata );
+	AddVertex( D.x, D.y, D.z, 1, 0, vertdata );
+	AddVertex( D.x, D.y, D.z, 1, 0, vertdata );
+	AddVertex( C.x, C.y, C.z, 0, 0, vertdata );
+	AddVertex( B.x, B.y, B.z, 0, 1, vertdata );
 					
-	AddCubeVertex( H.x, H.y, H.z, 0, 1, vertdata ); //Top
-	AddCubeVertex( G.x, G.y, G.z, 1, 1, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 1, 0, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 1, 0, vertdata );
-	AddCubeVertex( D.x, D.y, D.z, 0, 0, vertdata );
-	AddCubeVertex( H.x, H.y, H.z, 0, 1, vertdata );
+	AddVertex( H.x, H.y, H.z, 0, 1, vertdata ); //Top
+	AddVertex( G.x, G.y, G.z, 1, 1, vertdata );
+	AddVertex( C.x, C.y, C.z, 1, 0, vertdata );
+	AddVertex( C.x, C.y, C.z, 1, 0, vertdata );
+	AddVertex( D.x, D.y, D.z, 0, 0, vertdata );
+	AddVertex( H.x, H.y, H.z, 0, 1, vertdata );
 				
-	AddCubeVertex( A.x, A.y, A.z, 0, 1, vertdata ); //Bottom
-	AddCubeVertex( B.x, B.y, B.z, 1, 1, vertdata );
-	AddCubeVertex( F.x, F.y, F.z, 1, 0, vertdata );
-	AddCubeVertex( F.x, F.y, F.z, 1, 0, vertdata );
-	AddCubeVertex( E.x, E.y, E.z, 0, 0, vertdata );
-	AddCubeVertex( A.x, A.y, A.z, 0, 1, vertdata );
+	AddVertex( A.x, A.y, A.z, 0, 1, vertdata ); //Bottom
+	AddVertex( B.x, B.y, B.z, 1, 1, vertdata );
+	AddVertex( F.x, F.y, F.z, 1, 0, vertdata );
+	AddVertex( F.x, F.y, F.z, 1, 0, vertdata );
+	AddVertex( E.x, E.y, E.z, 0, 0, vertdata );
+	AddVertex( A.x, A.y, A.z, 0, 1, vertdata );
 					
-	AddCubeVertex( A.x, A.y, A.z, 0, 1, vertdata ); //Left
-	AddCubeVertex( E.x, E.y, E.z, 1, 1, vertdata );
-	AddCubeVertex( H.x, H.y, H.z, 1, 0, vertdata );
-	AddCubeVertex( H.x, H.y, H.z, 1, 0, vertdata );
-	AddCubeVertex( D.x, D.y, D.z, 0, 0, vertdata );
-	AddCubeVertex( A.x, A.y, A.z, 0, 1, vertdata );
+	AddVertex( A.x, A.y, A.z, 0, 1, vertdata ); //Left
+	AddVertex( E.x, E.y, E.z, 1, 1, vertdata );
+	AddVertex( H.x, H.y, H.z, 1, 0, vertdata );
+	AddVertex( H.x, H.y, H.z, 1, 0, vertdata );
+	AddVertex( D.x, D.y, D.z, 0, 0, vertdata );
+	AddVertex( A.x, A.y, A.z, 0, 1, vertdata );
 
-	AddCubeVertex( F.x, F.y, F.z, 0, 1, vertdata ); //Right
-	AddCubeVertex( B.x, B.y, B.z, 1, 1, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 1, 0, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 1, 0, vertdata );
-	AddCubeVertex( G.x, G.y, G.z, 0, 0, vertdata );
-	AddCubeVertex( F.x, F.y, F.z, 0, 1, vertdata );
+	AddVertex( F.x, F.y, F.z, 0, 1, vertdata ); //Right
+	AddVertex( B.x, B.y, B.z, 1, 1, vertdata );
+	AddVertex( C.x, C.y, C.z, 1, 0, vertdata );
+	AddVertex( C.x, C.y, C.z, 1, 0, vertdata );
+	AddVertex( G.x, G.y, G.z, 0, 0, vertdata );
+	AddVertex( F.x, F.y, F.z, 0, 1, vertdata );
 }
 
 void CMainApplication::AddPlaneToScene(Matrix4 mat, std::vector<float>& vertdata)
 {
-    // Matrix4 mat( outermat.data() );
-
     Vector4 A = mat * Vector4(0, 0, 0, 1);
     Vector4 B = mat * Vector4(1, 0, 0, 1);
     Vector4 C = mat * Vector4(1, 1, 0, 1);
     Vector4 D = mat * Vector4(0, 1, 0, 1);
 
-    // triangles instead of quads
-    //AddCubeVertex(B.x, B.y, B.z, 0, 1, vertdata);
-    //AddCubeVertex(A.x, A.y, A.z, 0, 0, vertdata);
-    //AddCubeVertex(D.x, D.y, D.z, 1, 0, vertdata);
-    //AddCubeVertex(D.x, D.y, D.z, 1, 0, vertdata);
-    //AddCubeVertex(C.x, C.y, C.z, 1, 1, vertdata);
-    //AddCubeVertex(B.x, B.y, B.z, 0, 1, vertdata);
+    AddVertex(B.x, B.y, B.z, 1, 0, vertdata);
+    AddVertex(A.x, A.y, A.z, 1, 1, vertdata);
+    AddVertex(D.x, D.y, D.z, 0, 1, vertdata);
+    AddVertex(D.x, D.y, D.z, 0, 1, vertdata);
+    AddVertex(C.x, C.y, C.z, 0, 0, vertdata);
+    AddVertex(B.x, B.y, B.z, 1, 0, vertdata);
+}
 
-    AddCubeVertex(B.x, B.y, B.z, 1, 0, vertdata);
-    AddCubeVertex(A.x, A.y, A.z, 1, 1, vertdata);
-    AddCubeVertex(D.x, D.y, D.z, 0, 1, vertdata);
-    AddCubeVertex(D.x, D.y, D.z, 0, 1, vertdata);
-    AddCubeVertex(C.x, C.y, C.z, 0, 0, vertdata);
-    AddCubeVertex(B.x, B.y, B.z, 1, 0, vertdata);
+void CMainApplication::AddPlaneMeshToScene(std::vector<float>& vertdata)
+{
+    std::cout << "Prepareing Image Plane Mesh..." << std::endl;
+    const int DIV = 2048;
+
+    // gen map matrix
+    cv::Mat new_cmat;
+    new_cmat = cv::getOptimalNewCameraMatrix(cam_mat, dist_coeffs, cv::Size(2048, 2048), 1);
+    cv::initUndistortRectifyMap(cam_mat, dist_coeffs, cv::Mat::eye(3, 3, CV_32FC1), new_cmat,
+        cv::Size(2048, 2048), CV_32FC1, mapx, mapy);
+
+    new_cmat = cv::getOptimalNewCameraMatrix(cam_mat, dist_coeffs, cv::Size(2048, 2048), 1);
+    cv::initUndistortRectifyMap(cam_mat, dist_coeffs, cv::Mat::eye(3, 3, CV_32FC1), new_cmat,
+        cv::Size(2048, 2048), CV_32FC1, mapx, mapy);
+
+    //cv::Mat uv;
+    //cv::resize(mapx, uv, cv::Size(DIV + 1, DIV + 1));
+    //mapx = uv / 2048;
+    //cv::resize(mapy, uv, cv::Size(DIV + 1, DIV + 1));
+    //mapy = uv / 2048;
+
+    mapx /= 2048;
+    mapy /= 2048;
+
+    // square 4 points on uv coordinate
+    Vector2 A = (1.0f / DIV) * Vector2(0, 0);
+    Vector2 a = Vector2(0, 0);
+    Vector2 B = (1.0f / DIV) * Vector2(1, 0);
+    Vector2 b = Vector2(1, 0);
+    Vector2 C = (1.0f / DIV) * Vector2(1, 1);
+    Vector2 c = Vector2(1, 1);
+    Vector2 D = (1.0f / DIV) * Vector2(0, 1);
+    Vector2 d = Vector2(0, 1);
+
+    for (int i = 0; i < DIV - 1; i++)
+    {
+        for (int j = 0; j < DIV - 1; j++)
+        {
+            Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
+            AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + i, b.y + j), mapy.at<float>(b.x + i, b.y + j), vertdata);
+            AddVertex(A.x + ofs.x, A.y + ofs.y, 0, mapx.at<float>(a.x + i, a.y + j), mapy.at<float>(a.x + i, a.y + j), vertdata);
+            AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + i, d.y + j), mapy.at<float>(d.x + i, d.y + j), vertdata);
+            AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + i, d.y + j), mapy.at<float>(d.x + i, d.y + j), vertdata);
+            AddVertex(C.x + ofs.x, C.y + ofs.y, 0, mapx.at<float>(c.x + i, c.y + j), mapy.at<float>(c.x + i, c.y + j), vertdata);
+            AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + i, b.y + j), mapy.at<float>(b.x + i, b.y + j), vertdata);
+        }
+    }
+    std::cout << "Done" << std::endl;
 }
 
 
@@ -1791,12 +1879,21 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
 	if( m_bShowCubes )
 	{
 		glUseProgram( m_unSceneProgramID );
-		glUniformMatrix4fv( m_nSceneMatrixLocation, 1, GL_FALSE, GetCurrentViewProjectionMatrix( nEye ).get() );
-        UpdateScene( nEye );
+
+        Matrix4 matTransform;
+        matTransform.translate(-0.5f, -0.5f, -0.3f);
+        Matrix4 eyeProjection = m_mat4Projection[nEye] * m_mat4eyePose[nEye];
+        glUniformMatrix4fv(m_nSceneMatrixLocation, 1, GL_FALSE, (eyeProjection * stereoProjection[nEye].invert() * matTransform).get());
+        glUniform1i(m_nImgTextureLocation, 0);
+
 		glBindVertexArray( m_unSceneVAO );
-		glBindTexture( GL_TEXTURE_2D, m_iTexture[nEye] );
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_iTexture[nEye]);
         UpdateTexture( nEye );
+
 		glDrawArrays( GL_TRIANGLES, 0, m_uiVertcount );
+
 		glBindVertexArray( 0 );
 	}
 
@@ -1830,48 +1927,21 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
 	glUseProgram( 0 );
 }
 
-void CMainApplication::UpdateScene(vr::Hmd_Eye nEye)
-{
-    std::vector<float> vertdataarray;
-    Matrix4 matTransform;
-    if (nEye == vr::Eye_Right)
-    {
-        matTransform.translate(-0.5f, -0.5f, -0.5f);
-    }
-    else
-    {
-        matTransform.translate(-0.5f, -0.5f, -0.5f);
-    }
-    Matrix4 mat = m_mat4HMDPose.invert() * matTransform;
-    AddPlaneToScene(mat, vertdataarray);
-
-    glBindBuffer(GL_ARRAY_BUFFER, m_glSceneVertBuffer);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(float) * vertdataarray.size(), &vertdataarray[0]);
-}
-
 void CMainApplication::UpdateTexture(vr::Hmd_Eye nEye)
 {
     if (m_bETCalibrate)
     {
-        if (nEye == vr::Eye_Left)
-        {
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, nImageWidth, nImageHeight,
-                GL_RGBA, GL_UNSIGNED_BYTE, m_vision[vr::Eye_Right].GetImagePtr());
-        }
-        else
-        {
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, nImageWidth, nImageHeight,
-                GL_RGBA, GL_UNSIGNED_BYTE, m_vision[vr::Eye_Left].GetImagePtr());
-        }
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 1024, m_gazePt.y, m_gazePtImg.cols, m_gazePtImg.rows,
-            GL_RGBA, GL_UNSIGNED_BYTE, m_gazePtImg.data);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, nImageWidth, nImageHeight,
+            GL_RGBA, GL_UNSIGNED_BYTE, m_vision[nEye].GetImagePtr());
+
+        //glTexSubImage2D(GL_TEXTURE_2D, 0, 1024, m_gazePt.y, m_gazePtImg.cols, m_gazePtImg.rows,
+        //    GL_RGBA, GL_UNSIGNED_BYTE, m_gazePtImg.data);
     }
     else
     {
         glTexSubImage2D(GL_TEXTURE_2D, 0, m_gazePt.x, m_gazePt.y, m_gazePtImg.cols, m_gazePtImg.rows,
             GL_RGBA, GL_UNSIGNED_BYTE, m_gazePtImg.data);
     }
-    
 }
 
 //-----------------------------------------------------------------------------
