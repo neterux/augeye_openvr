@@ -131,7 +131,7 @@ public:
     void UpdateTexture( vr::Hmd_Eye nEye );  // Add
 
 	Matrix4 GetHMDMatrixProjectionEye( vr::Hmd_Eye nEye );
-    Matrix3 CalcIntrinsicsFromProjection(vr::Hmd_Eye nEye, bool ydown = true);
+    Matrix3 IntrinsicsFromProjection(vr::Hmd_Eye nEye, bool ydown = true);
 	Matrix4 GetHMDMatrixPoseEye( vr::Hmd_Eye nEye );
 	Matrix4 GetCurrentViewProjectionMatrix( vr::Hmd_Eye nEye );
 	void UpdateHMDMatrixPose();
@@ -243,7 +243,8 @@ private: // OpenGL bookkeeping
 	GLuint m_unRenderModelProgramID;
 
 	GLint m_nSceneMatrixLocation;
-    GLint m_nImgTextureLocation;
+    GLint m_nCameraTextureLocation;
+    GLint m_nCalibBooleanLocation;
 	GLint m_nControllerMatrixLocation;
 	GLint m_nRenderModelMatrixLocation;
 
@@ -278,22 +279,37 @@ private: // OpenGL bookkeeping
     cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 1172.5f, 0.f, 1024.f, 0.f, 1172.5f, 1024.f, 0.f, 0.f, 1.f);
     cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) << -0.02612325714, -0.2002757143, 0.0000088126, 0.00001278283571,
             -0.006831787357, 0.3176116643, -0.28692775, -0.04330581357);
-    cv::Mat mapx, mapy;
 
-    Matrix4 stereoProjection[2] =
+    Matrix4 m_mat4StereoProjection[2] =
     {
         Matrix4(
-            1172.5f, 0.f, 1.02208907e+03f, 0.f,
-            0.f, 1172.5f, 1.12288197e+03f, 0.f,
+            1172.5f, 0.f, 1.02309077e+03f, 0.f,
+            0.f, 1172.5f, 1.25093422e+03f, 0.f,
             0.f, 0.f, 1.f, 0.f,
             0.f, 0.f, 0.f, 1.f
         ),
         Matrix4(
-            1172.5f, 0.f, 1.02208907e+03f, 0.f,
-            0.f, 1172.5f, 1.12288197e+03f, -4.60914960e+03f,
+            1172.5f, 0.f, 1.02309077e+03f, 0.f,
+            0.f, 1172.5f, 1.25093422e+03f, -3.26792056e+03f,
             0.f, 0.f, 1.f, 0.f,
             0.f, 0.f, 0.f, 1.f
         )
+    };
+
+    float stereo_cam_mat[2][9] =
+    {
+        { 1172.5f, 0.f, 1.02309077e+03f, 0.f, 1172.5f, 1.25093422e+03f, 0.f, 0.f, 1.f },
+        { 1172.5f, 0.f, 1.02309077e+03f, 0.f, 1172.5f, 1.25093422e+03f, 0.f, 0.f, 1.f }
+    };
+
+    float stereo_rotate_mat[2][9] =
+    {
+        { 0.99911598f, 0.04200094f, -0.00178599f,
+          0.04198325f, -0.99470763f, 0.09377711f,
+          0.00216219f, -0.09376919f, -0.99559162f },
+        { 0.99920284f, 0.03988358f, 0.00172761f,
+          0.03990643f, -0.99907119f, -0.01625526f,
+          0.00107769f, 0.01631125f, -0.99986638f }
     };
 
     //// for eye tracking
@@ -301,14 +317,14 @@ private: // OpenGL bookkeeping
 
     int m_eye;
     bool m_bChangeFocus = false;
-    bool m_bBlack = false;
     cv::Point2f m_pupilCenterPt[2];
-    cv::Point2f m_gazePt;
+    cv::Point2f m_gazePt;// [2] ;
     cv::Mat m_pupilToGaze[2];  // transform matrix
     cv::Scalar m_color;
 
-    bool m_bETCalibrate;
+    bool m_bETCalibrated;
     bool m_bCalKeyPress;
+    const int CALIB = 0;
     unsigned int m_pressTime;  // msec
     cv::Mat m_gazePtImg;  // reference point image variable for calibration
     bool m_bRefPtGen;
@@ -431,7 +447,7 @@ CMainApplication::CMainApplication( int argc, char *argv[] )
 	, m_unControllerVAO( 0 )
 	, m_unSceneVAO( 0 )
     , m_nSceneMatrixLocation(-1)
-    , m_nImgTextureLocation(-1)
+    , m_nCameraTextureLocation(-1)
 	, m_nControllerMatrixLocation( -1 )
 	, m_nRenderModelMatrixLocation( -1 )
 	, m_iTrackedControllerCount( 0 )
@@ -441,7 +457,7 @@ CMainApplication::CMainApplication( int argc, char *argv[] )
 	, m_iSceneVolumeInit( 20 )
 	, m_strPoseClasses("")
 	, m_bShowCubes( true )
-    , m_bETCalibrate( false )
+    , m_bETCalibrated( false )
     , m_bCalKeyPress( false )
     , m_pressTime( 0 )
     , m_bRefPtGen( false )
@@ -600,8 +616,6 @@ bool CMainApplication::BInit()
     // uEyeCamera Init
     m_vision[vr::Eye_Left].Init(vr::Eye_Left + 1);
     m_vision[vr::Eye_Right].Init(vr::Eye_Right + 1);
-
-    CalcIntrinsicsFromProjection(vr::Eye_Left);
  
     UpdateHMDMatrixPose();
 	
@@ -617,7 +631,7 @@ bool CMainApplication::BInit()
 		return false;
 	}
 
-    int pt_distance = 768;
+    int pt_distance = 850;
     m_gazeCalPts = {
         cv::Point2f(pt_distance, pt_distance),
         cv::Point2f(nImageWidth - pt_distance, pt_distance),
@@ -811,7 +825,7 @@ bool CMainApplication::HandleInput()
             }
             if (sdlEvent.key.keysym.sym == SDLK_r)
             {
-                m_bETCalibrate = false;
+                m_bETCalibrated = false;
             }
             if (sdlEvent.key.keysym.sym == SDLK_c)
             {
@@ -833,13 +847,15 @@ bool CMainApplication::HandleInput()
             {
                 m_vision[m_eye].SetFocus(-5, true);
             }
-            if (sdlEvent.key.keysym.sym == SDLK_b)
+            if (sdlEvent.key.keysym.sym == SDLK_o)
             {
-                m_bBlack = true;
+                m_vision[vr::Eye_Left].SetFocus(169, false);
+                m_vision[vr::Eye_Right].SetFocus(150, false);
             }
-            if (sdlEvent.key.keysym.sym == SDLK_n)
+            if (sdlEvent.key.keysym.sym == SDLK_p)
             {
-                m_bBlack = false;
+                m_vision[vr::Eye_Left].SetFocus(200, false);
+                m_vision[vr::Eye_Right].SetFocus(181, false);
             }
 		}
 	}
@@ -937,9 +953,10 @@ void CMainApplication::RunMainLoop()
 
     std::thread t_eyetrack_L(EyeTrack, std::ref(m_pupilCenterPt[vr::Eye_Left]), vr::Eye_Left);
     std::thread t_eyetrack_R(EyeTrack, std::ref(m_pupilCenterPt[vr::Eye_Right]), vr::Eye_Right);
-
+    
     bool bGazePtChangeL = false;
     bool bGazePtChangeR = false;
+    int focus[2][2] = { {289, 234}, {270, 215} };
 
     unsigned int baseTime = SDL_GetTicks();
     int frameCount = 0;
@@ -947,16 +964,32 @@ void CMainApplication::RunMainLoop()
 	while ( !bQuit )  // Main loop
 	{
 		bQuit = HandleInput();
+        
+        m_bETCalibrated = true;
+        //if (m_bETCalibrated)
+        //{
+        //    CalcurateGaze();
 
-        if (m_bETCalibrate)
-        {
-            CalcurateGaze();
-            // std::cout << m_gazePt.x << ", " << m_gazePt.y << std::endl;
-        }
-        else
-        {
-            CalibrateEyeTrack();
-        }
+        //    // Change focus
+        //    if (m_gazePt.y < 980 && !bGazePtChangeL) // 1024
+        //    {
+        //        m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left][0], false);
+        //        m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right][0], false);
+        //        bGazePtChangeL = true;
+        //        bGazePtChangeR = false;
+        //    }
+        //    if (m_gazePt.y > 980 && !bGazePtChangeR)
+        //    {
+        //        m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left][1], false);
+        //        m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right][1], false);
+        //        bGazePtChangeL = false;
+        //        bGazePtChangeR = true;
+        //    }
+        //}
+        //else
+        //{
+        //    CalibrateEyeTrack();
+        //}
 
         RenderFrame();
 
@@ -1030,14 +1063,13 @@ void CMainApplication::CalibrateEyeTrack()
         }
     }
 
-    if (m_pupilCalPts[vr::Eye_Left].size() < 4)
+    if (m_pupilCalPts[CALIB].size() < 4)
     {
         if (!m_bRefPtGen)
         {
             m_gazePt = cv::Point2f(0, 0);
-            cv::Mat calImg = cv::Mat::zeros(cv::Size(nImageWidth, nImageHeight), CV_8UC4);
-            cv::circle(calImg, m_gazeCalPts[m_pupilCalPts[vr::Eye_Left].size()], 10, m_color, -1, CV_AA);
-            cv::cvtColor(calImg, m_gazePtImg, cv::COLOR_BGRA2RGBA);
+            m_gazePtImg = cv::Mat::zeros(cv::Size(nImageWidth, nImageHeight), CV_8UC3);
+            cv::circle(m_gazePtImg, m_gazeCalPts[m_pupilCalPts[vr::Eye_Left].size()], 7, m_color, -1, CV_AA);
             m_bRefPtGen = true;
         }
     }
@@ -1063,9 +1095,9 @@ void CMainApplication::CalibrateEyeTrack()
             m_pupilCalPts[nEye].shrink_to_fit();
         }
 
-        cv::cvtColor(cv::Mat::zeros(cv::Size(10, 10), CV_8UC4), m_gazePtImg, cv::COLOR_BGRA2RGBA);
+        m_gazePtImg = cv::Mat::zeros(cv::Size(20, 20), CV_8UC3);
         
-        m_bETCalibrate = true;
+        m_bETCalibrated = true;
     }
 }
 
@@ -1078,9 +1110,11 @@ void CMainApplication::CalcurateGaze()
         src_L.push_back(m_pupilCenterPt[vr::Eye_Left]);
         src_R.push_back(m_pupilCenterPt[vr::Eye_Right]);
     }
-    cv::perspectiveTransform(src_L, dst_R, m_pupilToGaze[vr::Eye_Left]);
-    cv::perspectiveTransform(src_R, dst_L, m_pupilToGaze[vr::Eye_Right]);
+    cv::perspectiveTransform(src_L, dst_L, m_pupilToGaze[vr::Eye_Left]);
+    cv::perspectiveTransform(src_R, dst_R, m_pupilToGaze[vr::Eye_Right]);
     m_gazePt = (dst_R[0] + dst_L[0]) / 2;
+    //m_gazePt[vr::Eye_Left] = dst_L[0];
+    //m_gazePt[vr::Eye_Right] = dst_R[0];
 }
 
 //-----------------------------------------------------------------------------
@@ -1249,19 +1283,23 @@ bool CMainApplication::CreateAllShaders()
         // vertex shader
         "#version 410\n"
         "uniform mat4 matrix;\n"
-        "layout(location = 0) in vec4 position;\n"
+        "layout(location = 0) in vec3 position;\n"
         "layout(location = 1) in vec2 v2UVcoordsIn;\n"
         "layout(location = 2) in vec3 v3NormalIn;\n"
+        "out vec2 posUV;\n"
         "out vec2 v2UVcoords;\n"
         "void main()\n"
         "{\n"
+        "	posUV = vec2(position.xy);\n"
         "	v2UVcoords = v2UVcoordsIn;\n"
-        "	gl_Position = matrix * position;\n"
+        "	gl_Position = matrix * vec4(position, 1.f);\n"
         "}\n",
 
         // Fragment Shader
         "#version 410 core\n"
-        "uniform sampler2D img;\n"
+        "uniform sampler2D camera;\n"
+        "uniform bool calibrated;\n"
+        "in vec2 posUV;\n"
         "in vec2 v2UVcoords;\n"
         "out vec4 outputColor;\n"
         "void main()\n"
@@ -1269,8 +1307,12 @@ bool CMainApplication::CreateAllShaders()
         "   float a = radians(-90.f);\n"
         "   mat2 rotate = mat2(cos(a), -sin(a), sin(a), cos(a));\n"
         "   vec2 center = vec2(0.5f, 0.5f);\n"
-        "   vec2 rot_uv = rotate * (v2UVcoords - center) * vec2(1.0f, -1.0f) + center;\n"
-        "   outputColor = texture(img, rot_uv);\n"
+        "   vec2 rot_uv = rotate * (v2UVcoords - center) * vec2(1.f, -1.f) + center;\n"
+        "   if (calibrated) {\n"
+        "       outputColor = texture(camera, rot_uv);\n"
+        "   } else {\n"
+        "       outputColor = texture(camera, posUV);\n"
+        "   }\n"
         "}\n"
     );
 	m_nSceneMatrixLocation = glGetUniformLocation( m_unSceneProgramID, "matrix" );
@@ -1279,10 +1321,16 @@ bool CMainApplication::CreateAllShaders()
 		dprintf( "Unable to find matrix uniform in scene shader\n" );
 		return false;
 	}
-    m_nImgTextureLocation = glGetUniformLocation(m_unSceneProgramID, "img");
-    if (m_nImgTextureLocation == -1)
+    m_nCameraTextureLocation = glGetUniformLocation(m_unSceneProgramID, "camera");
+    if (m_nCameraTextureLocation == -1)
     {
-        dprintf("Unable to find image texture uniform in scene shader\n");
+        dprintf("Unable to find camera texture uniform in scene shader\n");
+        return false;
+    }
+    m_nCalibBooleanLocation = glGetUniformLocation(m_unSceneProgramID, "calibrated");
+    if (m_nCalibBooleanLocation == -1)
+    {
+        dprintf("Unable to find camera texture uniform in scene shader\n");
         return false;
     }
 
@@ -1459,6 +1507,7 @@ void CMainApplication::SetupScene()
 	glDisableVertexAttribArray(0);
 	glDisableVertexAttribArray(1);
 
+    std::vector<float>().swap(vertdataarray);
 }
 
 
@@ -1555,14 +1604,11 @@ void CMainApplication::AddPlaneToScene(Matrix4 mat, std::vector<float>& vertdata
 void CMainApplication::AddPlaneMeshToScene(std::vector<float>& vertdata)
 {
     std::cout << "Prepareing Image Plane Mesh..." << std::endl;
-    const int DIV = 2048;
+    const int DIV = 2048 - 1;
+    //const int DIV = 512;
 
     // gen map matrix
-    cv::Mat new_cmat;
-    new_cmat = cv::getOptimalNewCameraMatrix(cam_mat, dist_coeffs, cv::Size(2048, 2048), 1);
-    cv::initUndistortRectifyMap(cam_mat, dist_coeffs, cv::Mat::eye(3, 3, CV_32FC1), new_cmat,
-        cv::Size(2048, 2048), CV_32FC1, mapx, mapy);
-
+    cv::Mat new_cmat, mapx, mapy;
     new_cmat = cv::getOptimalNewCameraMatrix(cam_mat, dist_coeffs, cv::Size(2048, 2048), 1);
     cv::initUndistortRectifyMap(cam_mat, dist_coeffs, cv::Mat::eye(3, 3, CV_32FC1), new_cmat,
         cv::Size(2048, 2048), CV_32FC1, mapx, mapy);
@@ -1586,17 +1632,28 @@ void CMainApplication::AddPlaneMeshToScene(std::vector<float>& vertdata)
     Vector2 D = (1.0f / DIV) * Vector2(0, 1);
     Vector2 d = Vector2(0, 1);
 
-    for (int i = 0; i < DIV - 1; i++)
+    for (int i = 0; i < DIV; i++)
     {
-        for (int j = 0; j < DIV - 1; j++)
+        for (int j = 0; j < DIV; j++)
         {
-            Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
-            AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + i, b.y + j), mapy.at<float>(b.x + i, b.y + j), vertdata);
-            AddVertex(A.x + ofs.x, A.y + ofs.y, 0, mapx.at<float>(a.x + i, a.y + j), mapy.at<float>(a.x + i, a.y + j), vertdata);
-            AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + i, d.y + j), mapy.at<float>(d.x + i, d.y + j), vertdata);
-            AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + i, d.y + j), mapy.at<float>(d.x + i, d.y + j), vertdata);
-            AddVertex(C.x + ofs.x, C.y + ofs.y, 0, mapx.at<float>(c.x + i, c.y + j), mapy.at<float>(c.x + i, c.y + j), vertdata);
-            AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + i, b.y + j), mapy.at<float>(b.x + i, b.y + j), vertdata);
+            //if (i == j) {
+                Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
+                AddVertex(A.x + ofs.x, A.y + ofs.y, 0, mapx.at<float>(a.x + i, a.y + j), mapy.at<float>(a.x + i, a.y + j), vertdata);
+                AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + i, b.y + j), mapy.at<float>(b.x + i, b.y + j), vertdata);
+                AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + i, d.y + j), mapy.at<float>(d.x + i, d.y + j), vertdata);
+                AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + i, d.y + j), mapy.at<float>(d.x + i, d.y + j), vertdata);
+                AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + i, b.y + j), mapy.at<float>(b.x + i, b.y + j), vertdata);
+                AddVertex(C.x + ofs.x, C.y + ofs.y, 0, mapx.at<float>(c.x + i, c.y + j), mapy.at<float>(c.x + i, c.y + j), vertdata);
+            //}
+            //else {
+            //    Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
+            //    AddVertex(A.x + ofs.x, A.y + ofs.y, 0, mapx.at<float>(a.x + (i + 1) % DIV, a.y + (j+1)%DIV), mapy.at<float>(a.x + (i+1)%DIV, a.y + (j + 1) % DIV), vertdata);
+            //    AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + (i + 1) % DIV, b.y + (j + 1) % DIV), mapy.at<float>(b.x + (i + 1) % DIV, b.y + (j + 1) % DIV), vertdata);
+            //    AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + (i + 1) % DIV, d.y + (j + 1) % DIV), mapy.at<float>(d.x + (i + 1) % DIV, d.y + (j + 1) % DIV), vertdata);
+            //    AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + (i + 1) % DIV, d.y + (j + 1) % DIV), mapy.at<float>(d.x + (i + 1) % DIV, d.y + (j + 1) % DIV), vertdata);
+            //    AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + (i + 1) % DIV, b.y + (j + 1) % DIV), mapy.at<float>(b.x + (i + 1) % DIV, b.y + (j + 1) % DIV), vertdata);
+            //    AddVertex(C.x + ofs.x, C.y + ofs.y, 0, mapx.at<float>(c.x + (i + 1) % DIV, c.y + (j + 1) % DIV), mapy.at<float>(c.x + (i + 1) % DIV, c.y + (j + 1) % DIV), vertdata);
+            //}
         }
     }
     std::cout << "Done" << std::endl;
@@ -1882,9 +1939,15 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
 
         Matrix4 matTransform;
         matTransform.translate(-0.5f, -0.5f, -0.3f);
-        Matrix4 eyeProjection = m_mat4Projection[nEye] * m_mat4eyePose[nEye];
-        glUniformMatrix4fv(m_nSceneMatrixLocation, 1, GL_FALSE, (eyeProjection * stereoProjection[nEye].invert() * matTransform).get());
-        glUniform1i(m_nImgTextureLocation, 0);
+        Matrix3 mat4stCam = Matrix3(stereo_cam_mat[nEye]);
+        Matrix3 mat4stRot = Matrix3(stereo_rotate_mat[nEye]);
+        Matrix3 intrinsic = IntrinsicsFromProjection(nEye);
+        Matrix4 hmd_proj = m_mat4Projection[nEye] * m_mat4eyePose[nEye];
+        glUniformMatrix4fv(m_nSceneMatrixLocation, 1, GL_FALSE,
+            (hmd_proj * m_mat4StereoProjection[nEye].invert() * matTransform).get());
+        //(m_mat4Projection[nEye] * m_mat4eyePose[nEye] * mat4stRot.invert() * mat4stCam.invert() * matTransform).get());
+        glUniform1i(m_nCameraTextureLocation, 0);
+        glUniform1i(m_nCalibBooleanLocation, m_bETCalibrated);
 
 		glBindVertexArray( m_unSceneVAO );
 
@@ -1929,18 +1992,19 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
 
 void CMainApplication::UpdateTexture(vr::Hmd_Eye nEye)
 {
-    if (m_bETCalibrate)
+    if (m_bETCalibrated)
     {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, nImageWidth, nImageHeight,
             GL_RGBA, GL_UNSIGNED_BYTE, m_vision[nEye].GetImagePtr());
 
-        //glTexSubImage2D(GL_TEXTURE_2D, 0, 1024, m_gazePt.y, m_gazePtImg.cols, m_gazePtImg.rows,
-        //    GL_RGBA, GL_UNSIGNED_BYTE, m_gazePtImg.data);
+        //要マルチテクスチャ
+        //glTexSubImage2D(GL_TEXTURE_2D, 0, m_gazePt[nEye].x, m_gazePt[nEye].y, m_gazePtImg.cols, m_gazePtImg.rows,
+        //    GL_BGR, GL_UNSIGNED_BYTE, m_gazePtImg.data);
     }
     else
     {
         glTexSubImage2D(GL_TEXTURE_2D, 0, m_gazePt.x, m_gazePt.y, m_gazePtImg.cols, m_gazePtImg.rows,
-            GL_RGBA, GL_UNSIGNED_BYTE, m_gazePtImg.data);
+            GL_BGR, GL_UNSIGNED_BYTE, m_gazePtImg.data);
     }
 }
 
@@ -1994,7 +2058,7 @@ Matrix4 CMainApplication::GetHMDMatrixProjectionEye( vr::Hmd_Eye nEye )
 	);
 }
 
-Matrix3 CMainApplication::CalcIntrinsicsFromProjection(vr::Hmd_Eye nEye, bool ydown)
+Matrix3 CMainApplication::IntrinsicsFromProjection(vr::Hmd_Eye nEye, bool ydown)
 {
     if (!m_pHMD)
         return Matrix3();
