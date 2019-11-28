@@ -1,3 +1,4 @@
+#pragma once
 #include <zmq.hpp>
 #include <msgpack.hpp>
 #include <string>

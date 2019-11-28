@@ -30,8 +30,7 @@
 #include <opencv2/opencv.hpp>
 #include "uEyeCamera.h"
 #include "pupil.h"
-#include <mutex>
-#include <thread>
+#include "EyeTrack.h"
 
 #ifndef _WIN32
 #define APIENTRY
@@ -41,21 +40,53 @@
 #define _countof(x) (sizeof(x)/sizeof((x)[0]))
 #endif
 
-// for Key input, threading, and so on
-std::mutex m_mtx;
-bool isTracking;
-
-void EyeTrack(cv::Point2f &pupilCenterPt, int nEye)
-{
-    Pupil m_pupil;
-
-    isTracking = true;
-    while (isTracking)
-    {
-        //std::lock_guard<std::mutex> lock(m_mtx);
-        m_pupil.Get(&pupilCenterPt.x, &pupilCenterPt.y, nEye);
-    }
+//// for threading
+struct thread_aborted {};
+std::atomic<bool> exit_flag;
+void check_threadexit() {
+    if (exit_flag)
+        throw thread_aborted{};
 }
+
+void GetPupil(std::mutex &mtx, int nEye, cv::Point2f &pupilCenterPt)
+{
+    std::ostringstream msg;
+    msg << "Waiting Pupil Service... (" << nEye << ")";
+    std::cout << msg.str() << std::endl;
+
+    Pupil eyecam;
+
+    msg.str("");
+    msg.clear(std::ostringstream::goodbit);
+    msg << "Pupil Service connected (" << nEye << ")";
+    std::cout << msg.str() << std::endl;
+
+    try
+    {
+        while (true)
+        {
+            {
+                //std::lock_guard<std::mutex> lock(mtx);
+                eyecam.Get(&pupilCenterPt.x, &pupilCenterPt.y, nEye);
+            }
+            //EyeTrack::pupilPt pt;
+            //eyecam.Get(&pt.x, &pt.y, nEye);
+            //pupilCenterPt.store(pt);
+            check_threadexit();
+        }
+    }
+    catch (thread_aborted& e)
+    {
+        return;
+    }
+    return;
+}
+
+void GetPupil_exit() {
+    exit_flag = true;
+}
+
+//// for threading
 
 void ThreadSleep( unsigned long nMilliseconds )
 {
@@ -100,9 +131,6 @@ public:
 	bool BInit();
 	bool BInitGL();
 	bool BInitCompositor();
-
-    void CalibrateEyeTrack();
-    void CalcurateGaze();
 
 	void Shutdown();
 
@@ -199,9 +227,9 @@ private: // OpenGL bookkeeping
 	float m_fNearClip;
 	float m_fFarClip;
 
-	GLuint m_iTexture[2];                       // Texture for m_vision image correspond to L/R eye
-    unsigned nImageWidth, nImageHeight;         // Add
-    unsigned nTextureWidth, nTextureHeight;     // Add
+	GLuint m_iTexture[2];                           // Texture for m_vision image correspond to L/R eye
+    unsigned int nImageWidth, nImageHeight;         // Add
+    unsigned int nTextureWidth, nTextureHeight;     // Add
     inline unsigned texture_size(unsigned s) { return pow(2.0, unsigned(ceil(log(double(s)) / log(2.0)))); }
 
 	unsigned int m_uiVertcount;
@@ -275,6 +303,11 @@ private: // OpenGL bookkeeping
 
     /// for capturing vision image
     uEyeCamera m_vision[2];  // Handle uEyeCamera
+    int m_eye;
+    bool m_bChangeFocus = false;
+
+    // for eye tracking
+    EyeTrack tracker;
 
     cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 1172.5f, 0.f, 1024.f, 0.f, 1172.5f, 1024.f, 0.f, 0.f, 1.f);
     cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) << -0.02612325714, -0.2002757143, 0.0000088126, 0.00001278283571,
@@ -311,30 +344,6 @@ private: // OpenGL bookkeeping
           0.03990643f, -0.99907119f, -0.01625526f,
           0.00107769f, 0.01631125f, -0.99986638f }
     };
-
-    //// for eye tracking
-    //Pupil m_pupil;  // Handle Pupil eyetracker
-
-    int m_eye;
-    bool m_bChangeFocus = false;
-    cv::Point2f m_pupilCenterPt[2];
-    cv::Point2f m_gazePt;// [2] ;
-    cv::Mat m_pupilToGaze[2];  // transform matrix
-    cv::Scalar m_color;
-
-    bool m_bETCalibrated;
-    bool m_bCalKeyPress;
-    const int CALIB = 0;
-    unsigned int m_pressTime;  // msec
-    cv::Mat m_gazePtImg;  // reference point image variable for calibration
-    bool m_bRefPtGen;
-    std::vector<cv::Point2f> m_pupilPtStack[2];
-    std::vector<cv::Point2f> m_pupilCalPts[2];
-    std::vector<cv::Point2f> m_gazeCalPts;
-
-    std::vector<cv::Point2f> m_gazeError[2];
-    cv::Mat m_varStack[2][2];
-    
 };
 
 
@@ -457,10 +466,6 @@ CMainApplication::CMainApplication( int argc, char *argv[] )
 	, m_iSceneVolumeInit( 20 )
 	, m_strPoseClasses("")
 	, m_bShowCubes( true )
-    , m_bETCalibrated( false )
-    , m_bCalKeyPress( false )
-    , m_pressTime( 0 )
-    , m_bRefPtGen( false )
     , m_eye( 0 )
 {
 
@@ -631,14 +636,8 @@ bool CMainApplication::BInit()
 		return false;
 	}
 
-    int pt_distance = 850;
-    m_gazeCalPts = {
-        cv::Point2f(pt_distance, pt_distance),
-        cv::Point2f(nImageWidth - pt_distance, pt_distance),
-        cv::Point2f(pt_distance, nImageHeight - pt_distance),
-        cv::Point2f(nImageWidth - pt_distance, nImageHeight - pt_distance)
-    };
-    m_color = cv::Scalar(255, 255, 255);
+    // init EyeTrack
+    tracker.Init(nImageWidth, nImageHeight);
 
 	vr::VRInput()->SetActionManifestPath( Path_MakeAbsolute( "../hellovr_actions.json", Path_StripFilename( Path_GetExecutablePath() ) ).c_str() );
 
@@ -825,11 +824,11 @@ bool CMainApplication::HandleInput()
             }
             if (sdlEvent.key.keysym.sym == SDLK_r)
             {
-                m_bETCalibrated = false;
+                tracker.calibrated = false;
             }
             if (sdlEvent.key.keysym.sym == SDLK_c)
             {
-                m_bCalKeyPress = true;
+                tracker.calibKeyPressed = true;
             }
             if (sdlEvent.key.keysym.sym == SDLK_RIGHT)
             {
@@ -951,9 +950,10 @@ void CMainApplication::RunMainLoop()
 	SDL_StartTextInput();
 	SDL_ShowCursor( SDL_DISABLE );
 
-    std::thread t_eyetrack_L(EyeTrack, std::ref(m_pupilCenterPt[vr::Eye_Left]), vr::Eye_Left);
-    std::thread t_eyetrack_R(EyeTrack, std::ref(m_pupilCenterPt[vr::Eye_Right]), vr::Eye_Right);
-    
+    std::thread t_eyetrack_L(GetPupil, std::ref(tracker.mtx), vr::Eye_Left, std::ref(tracker.pupilCenterPt[vr::Eye_Left]));
+    std::thread t_eyetrack_R(GetPupil, std::ref(tracker.mtx), vr::Eye_Right, std::ref(tracker.pupilCenterPt[vr::Eye_Right]));
+    //tracker.calibrated = true;
+
     bool bGazePtChangeL = false;
     bool bGazePtChangeR = false;
     int focus[2][2] = { {289, 234}, {270, 215} };
@@ -963,158 +963,52 @@ void CMainApplication::RunMainLoop()
 
 	while ( !bQuit )  // Main loop
 	{
-		bQuit = HandleInput();
-        
-        m_bETCalibrated = true;
-        //if (m_bETCalibrated)
-        //{
-        //    CalcurateGaze();
-
-        //    // Change focus
-        //    if (m_gazePt.y < 980 && !bGazePtChangeL) // 1024
-        //    {
-        //        m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left][0], false);
-        //        m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right][0], false);
-        //        bGazePtChangeL = true;
-        //        bGazePtChangeR = false;
-        //    }
-        //    if (m_gazePt.y > 980 && !bGazePtChangeR)
-        //    {
-        //        m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left][1], false);
-        //        m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right][1], false);
-        //        bGazePtChangeL = false;
-        //        bGazePtChangeR = true;
-        //    }
-        //}
-        //else
-        //{
-        //    CalibrateEyeTrack();
-        //}
-
-        RenderFrame();
-
+        // fps
         frameCount++;
         unsigned int currentTime = SDL_GetTicks();
         if (currentTime - baseTime >= 1000)
         {
             float fps = float(frameCount) / (currentTime - baseTime) * 1000;
             printf("\rfps: %f", fps);
-            //std::cout << "fps: " << fps << std::endl;
             baseTime = SDL_GetTicks();
             frameCount = 0;
         }
+
+		bQuit = HandleInput();
+        
+        if (tracker.calibrated)
+        {
+            tracker.CalcurateGaze();
+
+            //// Change focus
+            //if (tracker.gazePt.y < 980 && !bGazePtChangeL) // 1024
+            //{
+            //    m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left][0], false);
+            //    m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right][0], false);
+            //    bGazePtChangeL = true;
+            //    bGazePtChangeR = false;
+            //}
+            //if (tracker.gazePt.y > 980 && !bGazePtChangeR)
+            //{
+            //    m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left][1], false);
+            //    m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right][1], false);
+            //    bGazePtChangeL = false;
+            //    bGazePtChangeR = true;
+            //}
+        }
+        else
+        {
+            tracker.Calibrate();
+        }
+
+        RenderFrame();
 	}
 
-    {
-        std::lock_guard<std::mutex> lock(m_mtx);
-        isTracking = false;
-    }
-    t_eyetrack_L.join();
-    t_eyetrack_R.join();
+    t_eyetrack_L.detach();
+    t_eyetrack_R.detach();
+    GetPupil_exit();
 
 	SDL_StopTextInput();
-}
-
-void CMainApplication::CalibrateEyeTrack()
-{
-    if (m_bCalKeyPress)
-    {
-        if (m_pressTime == 0)
-        {
-            m_pressTime = SDL_GetTicks();
-
-            m_color = cv::Scalar(0, 241, 255);
-            m_bRefPtGen = false;
-        }
-
-        std::lock_guard<std::mutex> lock(m_mtx);
-        m_pupilPtStack[vr::Eye_Left].push_back(m_pupilCenterPt[vr::Eye_Left]);
-        m_pupilPtStack[vr::Eye_Right].push_back(m_pupilCenterPt[vr::Eye_Right]);
-
-        if (SDL_GetTicks() - m_pressTime > 5000)
-        {
-            for (int nEye = 0; nEye < 2; nEye++)
-            {
-                cv::Mat _mean;
-                cv::reduce(m_pupilPtStack[nEye], _mean, 1, CV_REDUCE_AVG);
-                m_pupilCalPts[nEye].push_back(cv::Point2f(_mean.at<float>(0, 0), _mean.at<float>(0, 1)));
-
-                cv::Mat _var(m_pupilPtStack[nEye]);
-                cv::reduce(_var.mul(_var), _var, 0, CV_REDUCE_SUM);  // SIGMA_x^2
-                _var = _var / m_pupilPtStack[nEye].size() - _mean.mul(_mean);  // 1/N * SIGMA_x^2 - x_mean^2
-                //m_gazeError[nEye].push_back(cv::Point2f(sqrt(_var.at<float>(0, 0)), sqrt(_var.at<float>(0, 1))));
-                std::cout << "\nEye" << nEye << std::endl;
-                std::cout << "mean: " << _mean << std::endl;
-                std::cout << "std:  " << cv::Point2f(sqrt(_var.at<float>(0, 0)), sqrt(_var.at<float>(0, 1))) << std::endl;
-
-                //TODO: 4回分すべてを合わせて標準偏差を求める
-                //m_varStack[nEye][0].push_back(cv::Mat(m_pupilPtStack[nEye]).col(0) - _mean.at<float>(0, 0));
-                //m_varStack[nEye][1].push_back(cv::Mat(m_pupilPtStack[nEye]).col(1) - _mean.at<float>(0, 1));
-
-                m_pupilPtStack[nEye].clear();
-                m_pupilPtStack[nEye].shrink_to_fit();
-            }
-            
-            m_color = cv::Scalar(255, 255, 255);
-            m_bRefPtGen = false;
-
-            m_pressTime = 0;
-            m_bCalKeyPress = false;
-        }
-    }
-
-    if (m_pupilCalPts[CALIB].size() < 4)
-    {
-        if (!m_bRefPtGen)
-        {
-            m_gazePt = cv::Point2f(0, 0);
-            m_gazePtImg = cv::Mat::zeros(cv::Size(nImageWidth, nImageHeight), CV_8UC3);
-            cv::circle(m_gazePtImg, m_gazeCalPts[m_pupilCalPts[vr::Eye_Left].size()], 7, m_color, -1, CV_AA);
-            m_bRefPtGen = true;
-        }
-    }
-    else
-    {
-        for (int nEye = 0; nEye < 2; nEye++)
-        {
-            std::cout << m_pupilCalPts[nEye] << std::endl;
-            m_pupilToGaze[nEye] = cv::getPerspectiveTransform(m_pupilCalPts[nEye], m_gazeCalPts);
-
-            //for (int ax = 0; ax < 2; ax++)
-            //{
-            //    cv::Mat _var = m_varStack[nEye][ax];
-            //    std::cout << _var << std::endl;
-            //    std::cout << _var.size() << std::endl;
-            //    cv::reduce(_var.mul(_var), _var, 0, CV_REDUCE_SUM);  // SIGMA_x^2
-            //    _var = _var / _var.size().height;  // 1/N * SIGMA_x^2 - x_mean^2(0)
-            //    m_gazeError[ax].push_back(cv::Point2f(sqrt(_var.at<float>(0, 0)), sqrt(_var.at<float>(0, 1))));
-            //    std::cout << m_gazeError[ax] << std::endl;
-            //}
-
-            m_pupilCalPts[nEye].clear();
-            m_pupilCalPts[nEye].shrink_to_fit();
-        }
-
-        m_gazePtImg = cv::Mat::zeros(cv::Size(20, 20), CV_8UC3);
-        
-        m_bETCalibrated = true;
-    }
-}
-
-void CMainApplication::CalcurateGaze()
-{
-    std::vector<cv::Vec2f> src_R, src_L;
-    std::vector<cv::Vec2f> dst_R, dst_L;
-    {
-        std::lock_guard<std::mutex> lock(m_mtx);
-        src_L.push_back(m_pupilCenterPt[vr::Eye_Left]);
-        src_R.push_back(m_pupilCenterPt[vr::Eye_Right]);
-    }
-    cv::perspectiveTransform(src_L, dst_L, m_pupilToGaze[vr::Eye_Left]);
-    cv::perspectiveTransform(src_R, dst_R, m_pupilToGaze[vr::Eye_Right]);
-    m_gazePt = (dst_R[0] + dst_L[0]) / 2;
-    //m_gazePt[vr::Eye_Left] = dst_L[0];
-    //m_gazePt[vr::Eye_Right] = dst_R[0];
 }
 
 //-----------------------------------------------------------------------------
@@ -1304,10 +1198,10 @@ bool CMainApplication::CreateAllShaders()
         "out vec4 outputColor;\n"
         "void main()\n"
         "{\n"
-        "   float a = radians(-90.f);\n"
+        "   float a = radians(-180.f);\n"
         "   mat2 rotate = mat2(cos(a), -sin(a), sin(a), cos(a));\n"
         "   vec2 center = vec2(0.5f, 0.5f);\n"
-        "   vec2 rot_uv = rotate * (v2UVcoords - center) * vec2(1.f, -1.f) + center;\n"
+        "   vec2 rot_uv = rotate * (v2UVcoords - center) + center;\n"
         "   if (calibrated) {\n"
         "       outputColor = texture(camera, rot_uv);\n"
         "   } else {\n"
@@ -1330,7 +1224,7 @@ bool CMainApplication::CreateAllShaders()
     m_nCalibBooleanLocation = glGetUniformLocation(m_unSceneProgramID, "calibrated");
     if (m_nCalibBooleanLocation == -1)
     {
-        dprintf("Unable to find camera texture uniform in scene shader\n");
+        dprintf("Unable to find bool uniform in scene shader\n");
         return false;
     }
 
@@ -1604,8 +1498,7 @@ void CMainApplication::AddPlaneToScene(Matrix4 mat, std::vector<float>& vertdata
 void CMainApplication::AddPlaneMeshToScene(std::vector<float>& vertdata)
 {
     std::cout << "Prepareing Image Plane Mesh..." << std::endl;
-    const int DIV = 2048 - 1;
-    //const int DIV = 512;
+    const int DIV = 256;
 
     // gen map matrix
     cv::Mat new_cmat, mapx, mapy;
@@ -1613,47 +1506,33 @@ void CMainApplication::AddPlaneMeshToScene(std::vector<float>& vertdata)
     cv::initUndistortRectifyMap(cam_mat, dist_coeffs, cv::Mat::eye(3, 3, CV_32FC1), new_cmat,
         cv::Size(2048, 2048), CV_32FC1, mapx, mapy);
 
-    //cv::Mat uv;
-    //cv::resize(mapx, uv, cv::Size(DIV + 1, DIV + 1));
-    //mapx = uv / 2048;
-    //cv::resize(mapy, uv, cv::Size(DIV + 1, DIV + 1));
-    //mapy = uv / 2048;
-
-    mapx /= 2048;
-    mapy /= 2048;
+    cv::Mat uv;
+    cv::resize(mapx, uv, cv::Size(DIV + 1, DIV + 1));
+    mapx = uv / 2048;
+    cv::resize(mapy, uv, cv::Size(DIV + 1, DIV + 1));
+    mapy = uv / 2048;
 
     // square 4 points on uv coordinate
-    Vector2 A = (1.0f / DIV) * Vector2(0, 0);
     Vector2 a = Vector2(0, 0);
-    Vector2 B = (1.0f / DIV) * Vector2(1, 0);
     Vector2 b = Vector2(1, 0);
-    Vector2 C = (1.0f / DIV) * Vector2(1, 1);
     Vector2 c = Vector2(1, 1);
-    Vector2 D = (1.0f / DIV) * Vector2(0, 1);
     Vector2 d = Vector2(0, 1);
-
+    Vector2 A = (1.0f / DIV) * a;
+    Vector2 B = (1.0f / DIV) * b;
+    Vector2 C = (1.0f / DIV) * c;
+    Vector2 D = (1.0f / DIV) * d;
+    
     for (int i = 0; i < DIV; i++)
     {
         for (int j = 0; j < DIV; j++)
         {
-            //if (i == j) {
-                Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
-                AddVertex(A.x + ofs.x, A.y + ofs.y, 0, mapx.at<float>(a.x + i, a.y + j), mapy.at<float>(a.x + i, a.y + j), vertdata);
-                AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + i, b.y + j), mapy.at<float>(b.x + i, b.y + j), vertdata);
-                AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + i, d.y + j), mapy.at<float>(d.x + i, d.y + j), vertdata);
-                AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + i, d.y + j), mapy.at<float>(d.x + i, d.y + j), vertdata);
-                AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + i, b.y + j), mapy.at<float>(b.x + i, b.y + j), vertdata);
-                AddVertex(C.x + ofs.x, C.y + ofs.y, 0, mapx.at<float>(c.x + i, c.y + j), mapy.at<float>(c.x + i, c.y + j), vertdata);
-            //}
-            //else {
-            //    Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
-            //    AddVertex(A.x + ofs.x, A.y + ofs.y, 0, mapx.at<float>(a.x + (i + 1) % DIV, a.y + (j+1)%DIV), mapy.at<float>(a.x + (i+1)%DIV, a.y + (j + 1) % DIV), vertdata);
-            //    AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + (i + 1) % DIV, b.y + (j + 1) % DIV), mapy.at<float>(b.x + (i + 1) % DIV, b.y + (j + 1) % DIV), vertdata);
-            //    AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + (i + 1) % DIV, d.y + (j + 1) % DIV), mapy.at<float>(d.x + (i + 1) % DIV, d.y + (j + 1) % DIV), vertdata);
-            //    AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + (i + 1) % DIV, d.y + (j + 1) % DIV), mapy.at<float>(d.x + (i + 1) % DIV, d.y + (j + 1) % DIV), vertdata);
-            //    AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + (i + 1) % DIV, b.y + (j + 1) % DIV), mapy.at<float>(b.x + (i + 1) % DIV, b.y + (j + 1) % DIV), vertdata);
-            //    AddVertex(C.x + ofs.x, C.y + ofs.y, 0, mapx.at<float>(c.x + (i + 1) % DIV, c.y + (j + 1) % DIV), mapy.at<float>(c.x + (i + 1) % DIV, c.y + (j + 1) % DIV), vertdata);
-            //}
+            Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
+            AddVertex(A.x + ofs.x, A.y + ofs.y, 0, mapx.at<float>(a.x + j, a.y + i), mapy.at<float>(a.x + j, a.y + i), vertdata);
+            AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
+            AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
+            AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
+            AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
+            AddVertex(C.x + ofs.x, C.y + ofs.y, 0, mapx.at<float>(c.x + j, c.y + i), mapy.at<float>(c.x + j, c.y + i), vertdata);
         }
     }
     std::cout << "Done" << std::endl;
@@ -1947,7 +1826,7 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
             (hmd_proj * m_mat4StereoProjection[nEye].invert() * matTransform).get());
         //(m_mat4Projection[nEye] * m_mat4eyePose[nEye] * mat4stRot.invert() * mat4stCam.invert() * matTransform).get());
         glUniform1i(m_nCameraTextureLocation, 0);
-        glUniform1i(m_nCalibBooleanLocation, m_bETCalibrated);
+        glUniform1i(m_nCalibBooleanLocation, tracker.calibrated);
 
 		glBindVertexArray( m_unSceneVAO );
 
@@ -1992,19 +1871,19 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
 
 void CMainApplication::UpdateTexture(vr::Hmd_Eye nEye)
 {
-    if (m_bETCalibrated)
+    if (tracker.calibrated)
     {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, nImageWidth, nImageHeight,
             GL_RGBA, GL_UNSIGNED_BYTE, m_vision[nEye].GetImagePtr());
 
         //要マルチテクスチャ
-        //glTexSubImage2D(GL_TEXTURE_2D, 0, m_gazePt[nEye].x, m_gazePt[nEye].y, m_gazePtImg.cols, m_gazePtImg.rows,
-        //    GL_BGR, GL_UNSIGNED_BYTE, m_gazePtImg.data);
+        //glTexSubImage2D(GL_TEXTURE_2D, 0, tracker.gazePt[nEye].x, tracker.gazePt[nEye].y, tracker.gazePtImg.cols, tracker.gazePtImg.rows,
+        //    GL_BGR, GL_UNSIGNED_BYTE, tracker.gazePtImg.data);
     }
     else
     {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, m_gazePt.x, m_gazePt.y, m_gazePtImg.cols, m_gazePtImg.rows,
-            GL_BGR, GL_UNSIGNED_BYTE, m_gazePtImg.data);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, tracker.gazePt.x, tracker.gazePt.y, tracker.gazePtImg.cols, tracker.gazePtImg.rows,
+            GL_BGR, GL_UNSIGNED_BYTE, tracker.gazePtImg.data);
     }
 }
 
