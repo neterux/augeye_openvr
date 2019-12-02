@@ -16,7 +16,7 @@ public:
 
     std::mutex mtx;
 
-    cv::Point2f pupilCenterPt[2];
+    cv::Vec2f pupilCenterPt[2];
     //struct pupilPt
     //{
     //    float x;
@@ -25,7 +25,8 @@ public:
     //std::atomic<pupilPt> pupilCenterPt[2];
 
     cv::Point2f gazePtCalib;
-    cv::Point2f gazePt[2];
+    std::vector<cv::Vec2f> gazePt[2];
+    cv::Point3f gazeDepthPt;
     cv::Mat gazePtImg;  // reference point image variable for calibration
 
     std::vector<cv::Point2f> gazeError[2];
@@ -51,5 +52,6 @@ private:
 public:
     void Calibrate();
     void CalcurateGaze();
+    cv::Point3f GetGazeDepth(cv::Mat proj[2]);
 
 };

@@ -51,7 +51,7 @@ void check_threadexit() {
         throw thread_aborted{};
 }
 
-void GetPupil(std::mutex& mtx, int nEye, cv::Point2f& pupilCenterPt)
+void GetPupil(std::mutex& mtx, int nEye, cv::Vec2f& pt)
 {
     std::ostringstream msg;
     msg << "Waiting Pupil Service... (" << nEye << ")";
@@ -70,7 +70,7 @@ void GetPupil(std::mutex& mtx, int nEye, cv::Point2f& pupilCenterPt)
         {
             {
                 //std::lock_guard<std::mutex> lock(mtx);
-                eyecam.Get(&pupilCenterPt.x, &pupilCenterPt.y, nEye);
+                eyecam.Get(&pt[0], &pt[1], nEye);
             }
             //EyeTrack::pupilPt pt;
             //eyecam.Get(&pt.x, &pt.y, nEye);
@@ -88,6 +88,38 @@ void GetPupil(std::mutex& mtx, int nEye, cv::Point2f& pupilCenterPt)
 void GetPupil_exit() {
     exit_flag = true;
 }
+
+class Csv
+{
+private:
+    const std::string PATH = "D:\\Developing\\sawai\\calibration\\outer\\gaze";
+
+    std::ofstream* ofs;
+    int count;
+
+public:
+    Csv::Csv()
+        : count(0)
+        , ofs(nullptr)
+    {};
+
+    void Csv::Open()
+    {
+        ofs = new std::ofstream(PATH + std::to_string(count) + ".csv");
+    }
+
+    void Csv::WriteGaze(cv::Point3f g)
+    {
+        *ofs << g.x << "," << g.y << "," << g.z << std::endl;
+    }
+
+    void Csv::Close()
+    {
+        ofs->close();
+        count++;
+    }
+};
+
 #endif // USE_EYETRACKER
 
 void ThreadSleep( unsigned long nMilliseconds )
@@ -311,6 +343,9 @@ private: // OpenGL bookkeeping
 #ifdef USE_EYETRACKER
     // for eye tracking
     EyeTrack tracker;
+
+    bool m_measure;
+    Csv m_csv;
 #endif // USE_EYETRACKER
 
     cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 1172.5f, 0.f, 1024.f, 0.f, 1172.5f, 1024.f, 0.f, 0.f, 1.f);
@@ -332,6 +367,19 @@ private: // OpenGL bookkeeping
     //        0.f, 0.f, 0.f, 1.f
     //    )
     //};
+
+    cv::Mat stereoProjection[2] =
+    {
+        (cv::Mat_<float>(3, 4) <<
+            1172.5f, 0.f, 7.94994858e+02f, 0.f,
+            0.f, 1172.5f, 1.02461522e+03f, 0.f,
+            0.f, 0.f, 1.f, 0.f),
+        (cv::Mat_<float>(3, 4) <<
+            1172.5f, 0.f, 7.94994858e+02f, -3.28434263e+03f,
+            0.f, 1172.5f, 1.02461522e+03f, 0.f,
+            0.f, 0.f, 1.f, 0.f)
+    };
+
     Matrix4 m_mat4StereoProjection[2] =
     {
         Matrix4(
@@ -348,21 +396,23 @@ private: // OpenGL bookkeeping
         )
     };
 
-    float stereo_cam_mat[2][9] =
-    {
-        { 1172.5f, 0.f, 1.02309077e+03f, 0.f, 1172.5f, 1.25093422e+03f, 0.f, 0.f, 1.f },
-        { 1172.5f, 0.f, 1.02309077e+03f, 0.f, 1172.5f, 1.25093422e+03f, 0.f, 0.f, 1.f }
-    };
+    
 
-    float stereo_rotate_mat[2][9] =
-    {
-        { 0.99911598f, 0.04200094f, -0.00178599f,
-          0.04198325f, -0.99470763f, 0.09377711f,
-          0.00216219f, -0.09376919f, -0.99559162f },
-        { 0.99920284f, 0.03988358f, 0.00172761f,
-          0.03990643f, -0.99907119f, -0.01625526f,
-          0.00107769f, 0.01631125f, -0.99986638f }
-    };
+    //float stereo_cam_mat[2][9] =
+    //{
+    //    { 1172.5f, 0.f, 1.02309077e+03f, 0.f, 1172.5f, 1.25093422e+03f, 0.f, 0.f, 1.f },
+    //    { 1172.5f, 0.f, 1.02309077e+03f, 0.f, 1172.5f, 1.25093422e+03f, 0.f, 0.f, 1.f }
+    //};
+
+    //float stereo_rotate_mat[2][9] =
+    //{
+    //    { 0.99911598f, 0.04200094f, -0.00178599f,
+    //      0.04198325f, -0.99470763f, 0.09377711f,
+    //      0.00216219f, -0.09376919f, -0.99559162f },
+    //    { 0.99920284f, 0.03988358f, 0.00172761f,
+    //      0.03990643f, -0.99907119f, -0.01625526f,
+    //      0.00107769f, 0.01631125f, -0.99986638f }
+    //};
 };
 
 
@@ -658,6 +708,8 @@ bool CMainApplication::BInit()
 #ifdef USE_EYETRACKER
     // init EyeTrack
     tracker.Init(nImageWidth, nImageHeight);
+
+    m_measure = false;
 #endif // USE_EYETRACKER
 
     vr::VRInput()->SetActionManifestPath( Path_MakeAbsolute( "../hellovr_actions.json", Path_StripFilename( Path_GetExecutablePath() ) ).c_str() );
@@ -852,6 +904,20 @@ bool CMainApplication::HandleInput()
             {
                 tracker.calibKeyPressed = true;
             }
+            if (sdlEvent.key.keysym.sym == SDLK_s)
+            {
+                m_measure = !m_measure;
+                if (m_measure)
+                {
+                    m_csv.Open();
+                    std::cout << "Start measure" << std::endl;
+                }
+                else
+                {
+                    m_csv.Close();
+                    std::cout << "End measure" << std::endl;
+                }
+            }
 #endif // USE_EYETRACKER
             if (sdlEvent.key.keysym.sym == SDLK_RIGHT)
             {
@@ -1007,7 +1073,11 @@ void CMainApplication::RunMainLoop()
         {
             tracker.CalcurateGaze();
 
-            //tracker.GetGazeDepth();
+            if (m_measure)
+            {
+                m_csv.WriteGaze(tracker.GetGazeDepth(stereoProjection));
+            }
+
             //// Change focus
             //if (tracker.gazePt.y < 980 && !bGazePtChangeL) // 1024
             //{
