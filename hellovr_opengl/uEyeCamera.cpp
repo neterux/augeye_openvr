@@ -17,6 +17,7 @@ uEyeCamera::~uEyeCamera()
 {
     is_FreeImageMem(_camId, _image, _memId);
     is_ExitCamera(_camId);
+    std::cout << "Camera" << _camId << "  closed" << std::endl;
 }
 
 void uEyeCamera::Init(int CameraId)

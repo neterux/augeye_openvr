@@ -24,7 +24,8 @@ public:
     //};
     //std::atomic<pupilPt> pupilCenterPt[2];
 
-    cv::Point2f gazePt;// [2] ;
+    cv::Point2f gazePtCalib;
+    cv::Point2f gazePt[2];
     cv::Mat gazePtImg;  // reference point image variable for calibration
 
     std::vector<cv::Point2f> gazeError[2];

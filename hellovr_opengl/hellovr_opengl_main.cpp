@@ -40,7 +40,7 @@
 #define _countof(x) (sizeof(x)/sizeof((x)[0]))
 #endif
 
-//#define USE_EYETRACKER
+#define USE_EYETRACKER
 
 #ifdef USE_EYETRACKER
 // for threading
@@ -317,17 +317,32 @@ private: // OpenGL bookkeeping
     cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) << -0.02612325714, -0.2002757143, 0.0000088126, 0.00001278283571,
             -0.006831787357, 0.3176116643, -0.28692775, -0.04330581357);
 
+    //Matrix4 m_mat4StereoProjection[2] =
+    //{
+    //    Matrix4(
+    //        1172.5f, 0.f, 1.02309077e+03f, 0.f,
+    //        0.f, 1172.5f, 1.25093422e+03f, 0.f,
+    //        0.f, 0.f, 1.f, 0.f,
+    //        0.f, 0.f, 0.f, 1.f
+    //    ),
+    //    Matrix4(
+    //        1172.5f, 0.f, 1.02309077e+03f, 0.f,
+    //        0.f, 1172.5f, 1.25093422e+03f, -3.26792056e+03f,
+    //        0.f, 0.f, 1.f, 0.f,
+    //        0.f, 0.f, 0.f, 1.f
+    //    )
+    //};
     Matrix4 m_mat4StereoProjection[2] =
     {
         Matrix4(
-            1172.5f, 0.f, 1.02309077e+03f, 0.f,
-            0.f, 1172.5f, 1.25093422e+03f, 0.f,
+            1172.5f, 0.f, 7.94994858e+02f, 0.f,
+            0.f, 1172.5f, 1.02461522e+03f, 0.f,
             0.f, 0.f, 1.f, 0.f,
             0.f, 0.f, 0.f, 1.f
         ),
         Matrix4(
-            1172.5f, 0.f, 1.02309077e+03f, 0.f,
-            0.f, 1172.5f, 1.25093422e+03f, -3.26792056e+03f,
+            1172.5f, 0.f, 7.94994858e+02f, -3.28434263e+03f,
+            0.f, 1172.5f, 1.02461522e+03f, 0.f,
             0.f, 0.f, 1.f, 0.f,
             0.f, 0.f, 0.f, 1.f
         )
@@ -992,6 +1007,7 @@ void CMainApplication::RunMainLoop()
         {
             tracker.CalcurateGaze();
 
+            //tracker.GetGazeDepth();
             //// Change focus
             //if (tracker.gazePt.y < 980 && !bGazePtChangeL) // 1024
             //{
@@ -1818,7 +1834,6 @@ void CMainApplication::RenderStereoTargets()
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0 );
 }
 
-
 //-----------------------------------------------------------------------------
 // Purpose: Renders a scene with respect to nEye.
 //-----------------------------------------------------------------------------
@@ -1833,19 +1848,21 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
 
         Matrix4 matTransform;
         matTransform.translate(-0.5f, -0.5f, -0.3f);
-        Matrix3 mat4stCam = Matrix3(stereo_cam_mat[nEye]);
-        Matrix3 mat4stRot = Matrix3(stereo_rotate_mat[nEye]);
-        Matrix3 intrinsic = IntrinsicsFromProjection(nEye);
-        Matrix4 hmd_proj = m_mat4Projection[nEye] * m_mat4eyePose[nEye];
+        //Matrix3 mat4stCam = Matrix3(stereo_cam_mat[nEye]);
+        //Matrix3 mat4stRot = Matrix3(stereo_rotate_mat[nEye]);
+        //Matrix3 intrinsic = IntrinsicsFromProjection(nEye);
+        //Matrix4 hmd_proj = m_mat4Projection[nEye] * m_mat4eyePose[nEye];
+        float ipd = std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Left).m[0][3])
+            + std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Right).m[0][3]); // scale: m
         glUniformMatrix4fv(m_nSceneMatrixLocation, 1, GL_FALSE,
-            (hmd_proj * m_mat4StereoProjection[nEye].invert() * matTransform).get());
-        //(m_mat4Projection[nEye] * m_mat4eyePose[nEye] * mat4stRot.invert() * mat4stCam.invert() * matTransform).get());
+            (m_mat4Projection[nEye] * m_mat4StereoProjection[nEye].invert() * matTransform).get());
+        //(m_mat4Projection[nEye] * m_mat4eyePose[nEye] * m_mat4StereoProjection[nEye].invert() * matTransform).get());
         glUniform1i(m_nCameraTextureLocation, 0);
 #ifdef USE_EYETRACKER
         glUniform1i(m_nCalibBooleanLocation, tracker.calibrated);
 #else
         glUniform1i(m_nCalibBooleanLocation, true);
-#endif // USE_EYETRACKER        
+#endif // USE_EYETRACKER
 
         glBindVertexArray( m_unSceneVAO );
 
@@ -1902,7 +1919,7 @@ void CMainApplication::UpdateTexture(vr::Hmd_Eye nEye)
     }
     else
     {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, tracker.gazePt.x, tracker.gazePt.y, tracker.gazePtImg.cols, tracker.gazePtImg.rows,
+        glTexSubImage2D(GL_TEXTURE_2D, 0, tracker.gazePtCalib.x, tracker.gazePtCalib.y, tracker.gazePtImg.cols, tracker.gazePtImg.rows,
             GL_BGR, GL_UNSIGNED_BYTE, tracker.gazePtImg.data);
     }
 #else
@@ -1972,17 +1989,17 @@ Matrix3 CMainApplication::IntrinsicsFromProjection(vr::Hmd_Eye nEye, bool ydown)
     int width = 1440;
 
     Vector2 focal, center;
-    focal.x = proj.m[0][0] * width / 2.0f;
-    focal.y = proj.m[1][1] * height / 2.0f;
-    if (!ydown) focal.y *= -1.0f;
-    center.x = -(proj.m[2][0] * width - width) / 2.0f;
-    if (ydown) center.y = (proj.m[2][1] * height + height) / 2.0f;
-    else center.y = (height - proj.m[2][1] * height) / 2.0f;
+    focal.x = proj.m[0][0] * width / 2.f;
+    focal.y = proj.m[1][1] * height / 2.f;
+    if (!ydown) focal.y *= -1.f;
+    center.x = -(proj.m[2][0] * width - width) / 2.f;
+    if (ydown) center.y = (proj.m[2][1] * height + height) / 2.f;
+    else center.y = (height - proj.m[2][1] * height) / 2.f;
 
     return Matrix3(
-        focal.x, 0, center.x,
-        0, focal.y, center.y,
-        0, 0, 1
+        focal.x, 0.f, center.x,
+        0.f, focal.y, center.y,
+        0.f, 0.f, 1.f
     );
 }
 
@@ -1996,10 +2013,10 @@ Matrix4 CMainApplication::GetHMDMatrixPoseEye( vr::Hmd_Eye nEye )
 
     vr::HmdMatrix34_t matEyeRight = m_pHMD->GetEyeToHeadTransform( nEye );
     Matrix4 matrixObj(
-        matEyeRight.m[0][0], matEyeRight.m[1][0], matEyeRight.m[2][0], 0.0, 
-        matEyeRight.m[0][1], matEyeRight.m[1][1], matEyeRight.m[2][1], 0.0,
-        matEyeRight.m[0][2], matEyeRight.m[1][2], matEyeRight.m[2][2], 0.0,
-        matEyeRight.m[0][3], matEyeRight.m[1][3], matEyeRight.m[2][3], 1.0f
+        matEyeRight.m[0][0], matEyeRight.m[1][0], matEyeRight.m[2][0], 0.f, 
+        matEyeRight.m[0][1], matEyeRight.m[1][1], matEyeRight.m[2][1], 0.f,
+        matEyeRight.m[0][2], matEyeRight.m[1][2], matEyeRight.m[2][2], 0.f,
+        matEyeRight.m[0][3], matEyeRight.m[1][3], matEyeRight.m[2][3], 1.f
         );
 
     return matrixObj.invert();

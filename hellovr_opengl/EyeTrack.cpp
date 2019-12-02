@@ -82,7 +82,7 @@ void EyeTrack::Calibrate()
     {
         if (!refPtGenerated)
         {
-            gazePt = cv::Point2f(0, 0);
+            gazePtCalib = cv::Point2f(0, 0);
             gazePtImg = cv::Mat::zeros(cv::Size(img_width, img_height), CV_8UC3);
             cv::circle(gazePtImg, gazeCalibPts[pupilCalibPts[Eye_Left].size()], 7, ptColor, -1, CV_AA);
             refPtGenerated = true;
@@ -134,7 +134,6 @@ void EyeTrack::CalcurateGaze()
     cv::perspectiveTransform(src_L, dst_L, matPupilToGaze[Eye_Left]);
     cv::perspectiveTransform(src_R, dst_R, matPupilToGaze[Eye_Right]);
 
-    gazePt = (dst_R[0] + dst_L[0]) / 2;
-    //m_gazePt[vr::Eye_Left] = dst_L[0];
-    //m_gazePt[vr::Eye_Right] = dst_R[0];
+    gazePt[Eye_Left] = dst_L[0];
+    gazePt[Eye_Right] = dst_R[0];
 }
