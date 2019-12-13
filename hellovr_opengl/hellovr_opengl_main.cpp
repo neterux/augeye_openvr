@@ -40,7 +40,7 @@
 #define _countof(x) (sizeof(x)/sizeof((x)[0]))
 #endif
 
-#define USE_EYETRACKER
+//#define USE_EYETRACKER
 
 #ifdef USE_EYETRACKER
 // for threading
@@ -80,6 +80,10 @@ void GetPupil(std::mutex& mtx, int nEye, cv::Vec2f& pt)
     }
     catch (thread_aborted & e)
     {
+        msg.str("");
+        msg.clear(std::ostringstream::goodbit);
+        msg << "Pupil Service disconnected (" << nEye << ")";
+        std::cout << msg.str() << std::endl;
         return;
     }
     return;
@@ -193,7 +197,7 @@ public:
     void UpdateTexture( vr::Hmd_Eye nEye );  // Add
 
     Matrix4 GetHMDMatrixProjectionEye( vr::Hmd_Eye nEye );
-    Matrix3 IntrinsicsFromProjection(vr::Hmd_Eye nEye, bool ydown = true);
+    Matrix3 GetIntrinsicsFromHMDProjection(vr::Hmd_Eye nEye, bool ydown = true);
     Matrix4 GetHMDMatrixPoseEye( vr::Hmd_Eye nEye );
     Matrix4 GetCurrentViewProjectionMatrix( vr::Hmd_Eye nEye );
     void UpdateHMDMatrixPose();
@@ -351,68 +355,21 @@ private: // OpenGL bookkeeping
     cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 1172.5f, 0.f, 1024.f, 0.f, 1172.5f, 1024.f, 0.f, 0.f, 1.f);
     cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) << -0.02612325714, -0.2002757143, 0.0000088126, 0.00001278283571,
             -0.006831787357, 0.3176116643, -0.28692775, -0.04330581357);
-
-    //Matrix4 m_mat4StereoProjection[2] =
-    //{
-    //    Matrix4(
-    //        1172.5f, 0.f, 1.02309077e+03f, 0.f,
-    //        0.f, 1172.5f, 1.25093422e+03f, 0.f,
-    //        0.f, 0.f, 1.f, 0.f,
-    //        0.f, 0.f, 0.f, 1.f
-    //    ),
-    //    Matrix4(
-    //        1172.5f, 0.f, 1.02309077e+03f, 0.f,
-    //        0.f, 1172.5f, 1.25093422e+03f, -3.26792056e+03f,
-    //        0.f, 0.f, 1.f, 0.f,
-    //        0.f, 0.f, 0.f, 1.f
-    //    )
-    //};
-
     cv::Mat stereoProjection[2] =
     {
         (cv::Mat_<float>(3, 4) <<
-            1172.5f, 0.f, 7.94994858e+02f, 0.f,
-            0.f, 1172.5f, 1.02461522e+03f, 0.f,
+            1172.5f, 0.f, 1.02300409e+03f, 0.f,
+            0.f, 1172.5f, 7.09133301e+02f, 0.f,
             0.f, 0.f, 1.f, 0.f),
         (cv::Mat_<float>(3, 4) <<
-            1172.5f, 0.f, 7.94994858e+02f, -3.28434263e+03f,
-            0.f, 1172.5f, 1.02461522e+03f, 0.f,
+            1172.5f, 0.f, 1.02300409e+03f, 0.f,
+            0.f, 1172.5f, 7.09133301e+02f, 2.43640485e+03f,
             0.f, 0.f, 1.f, 0.f)
     };
 
-    Matrix4 m_mat4StereoProjection[2] =
-    {
-        Matrix4(
-            1172.5f, 0.f, 7.94994858e+02f, 0.f,
-            0.f, 1172.5f, 1.02461522e+03f, 0.f,
-            0.f, 0.f, 1.f, 0.f,
-            0.f, 0.f, 0.f, 1.f
-        ),
-        Matrix4(
-            1172.5f, 0.f, 7.94994858e+02f, -3.28434263e+03f,
-            0.f, 1172.5f, 1.02461522e+03f, 0.f,
-            0.f, 0.f, 1.f, 0.f,
-            0.f, 0.f, 0.f, 1.f
-        )
-    };
-
-    
-
-    //float stereo_cam_mat[2][9] =
-    //{
-    //    { 1172.5f, 0.f, 1.02309077e+03f, 0.f, 1172.5f, 1.25093422e+03f, 0.f, 0.f, 1.f },
-    //    { 1172.5f, 0.f, 1.02309077e+03f, 0.f, 1172.5f, 1.25093422e+03f, 0.f, 0.f, 1.f }
-    //};
-
-    //float stereo_rotate_mat[2][9] =
-    //{
-    //    { 0.99911598f, 0.04200094f, -0.00178599f,
-    //      0.04198325f, -0.99470763f, 0.09377711f,
-    //      0.00216219f, -0.09376919f, -0.99559162f },
-    //    { 0.99920284f, 0.03988358f, 0.00172761f,
-    //      0.03990643f, -0.99907119f, -0.01625526f,
-    //      0.00107769f, 0.01631125f, -0.99986638f }
-    //};
+    void GetMatProjFromStereoIntrinsics(cv::Mat stereoProj,
+        unsigned int w, unsigned int h, float znear, float zfar, Matrix4& mat4stProj);
+    Matrix4 m_mat4StereoProjection[2];
 };
 
 
@@ -705,6 +662,10 @@ bool CMainApplication::BInit()
         return false;
     }
 
+    GetMatProjFromStereoIntrinsics(stereoProjection[vr::Eye_Left],
+        nImageWidth, nImageHeight, m_fNearClip, m_fFarClip, m_mat4StereoProjection[vr::Eye_Left]);
+    GetMatProjFromStereoIntrinsics(stereoProjection[vr::Eye_Right],
+        nImageWidth, nImageHeight, m_fNearClip, m_fFarClip, m_mat4StereoProjection[vr::Eye_Right]);
 #ifdef USE_EYETRACKER
     // init EyeTrack
     tracker.Init(nImageWidth, nImageHeight);
@@ -1061,7 +1022,7 @@ void CMainApplication::RunMainLoop()
         if (currentTime - baseTime >= 1000)
         {
             float fps = float(frameCount) / (currentTime - baseTime) * 1000;
-            printf("\rfps: %f", fps);
+            printf("fps: %f\r", fps);
             baseTime = SDL_GetTicks();
             frameCount = 0;
         }
@@ -1599,7 +1560,7 @@ void CMainApplication::AddPlaneToScene(Matrix4 mat, std::vector<float>& vertdata
 void CMainApplication::AddPlaneMeshToScene(std::vector<float>& vertdata)
 {
     std::cout << "Prepareing Image Plane Mesh..." << std::endl;
-    const int DIV = 256;
+    const int DIV = 256 - 1;
 
     // gen map matrix
     cv::Mat new_cmat, mapx, mapy;
@@ -1918,15 +1879,17 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
 
         Matrix4 matTransform;
         matTransform.translate(-0.5f, -0.5f, -0.3f);
-        //Matrix3 mat4stCam = Matrix3(stereo_cam_mat[nEye]);
-        //Matrix3 mat4stRot = Matrix3(stereo_rotate_mat[nEye]);
-        //Matrix3 intrinsic = IntrinsicsFromProjection(nEye);
-        //Matrix4 hmd_proj = m_mat4Projection[nEye] * m_mat4eyePose[nEye];
-        float ipd = std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Left).m[0][3])
-            + std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Right).m[0][3]); // scale: m
-        glUniformMatrix4fv(m_nSceneMatrixLocation, 1, GL_FALSE,
-            (m_mat4Projection[nEye] * m_mat4StereoProjection[nEye].invert() * matTransform).get());
-        //(m_mat4Projection[nEye] * m_mat4eyePose[nEye] * m_mat4StereoProjection[nEye].invert() * matTransform).get());
+        //matTransform.translate(-0.5f, -0.5f, 0.f);  // new
+        const Matrix4 &hmd_proj = m_mat4Projection[nEye];
+        //Matrix4 hmd_eye = m_mat4eyePose[nEye];
+        //Matrix4 hmd_pose = m_mat4HMDPose;
+        Matrix4 str_proj = m_mat4StereoProjection[nEye];  // new
+        //float ipd = std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Left).m[0][3])
+        //    + std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Right).m[0][3]); // scale: m
+
+        Matrix4 mvp = hmd_proj * matTransform;
+        //Matrix4 mvp = hmd_proj * str_proj.invert() * matTransform;  // new
+        glUniformMatrix4fv(m_nSceneMatrixLocation, 1, GL_FALSE, mvp.get());
         glUniform1i(m_nCameraTextureLocation, 0);
 #ifdef USE_EYETRACKER
         glUniform1i(m_nCalibBooleanLocation, tracker.calibrated);
@@ -2048,7 +2011,7 @@ Matrix4 CMainApplication::GetHMDMatrixProjectionEye( vr::Hmd_Eye nEye )
     );
 }
 
-Matrix3 CMainApplication::IntrinsicsFromProjection(vr::Hmd_Eye nEye, bool ydown)
+Matrix3 CMainApplication::GetIntrinsicsFromHMDProjection(vr::Hmd_Eye nEye, bool ydown)
 {
     if (!m_pHMD)
         return Matrix3();
@@ -2070,6 +2033,23 @@ Matrix3 CMainApplication::IntrinsicsFromProjection(vr::Hmd_Eye nEye, bool ydown)
         focal.x, 0.f, center.x,
         0.f, focal.y, center.y,
         0.f, 0.f, 1.f
+    );
+}
+
+void CMainApplication::GetMatProjFromStereoIntrinsics(cv::Mat stereoProj,
+    unsigned int w, unsigned int h, float znear, float zfar, Matrix4& mat4stProj)
+{
+    Vector2 f, c;
+    f.x = stereoProj.at<float>(0, 0);
+    f.y = stereoProj.at<float>(1, 1);
+    c.x = stereoProj.at<float>(0, 2);
+    c.y = stereoProj.at<float>(1, 2);
+    
+    mat4stProj = Matrix4(
+        2.f * f.x / w,       0.f,                  0.f,                                  0.f,
+        0.f,                 2.f * f.y / h,        0.f,                                  0.f,
+        1.f - 2.f * c.x / w, -1.f + 2.f * c.y / h, -(zfar + znear) / (zfar - znear),     -1.f,
+        0.f,                 0.f,                  -2.f * zfar * znear / (zfar - znear), 0.f
     );
 }
 
