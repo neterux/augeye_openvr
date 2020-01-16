@@ -40,7 +40,7 @@
 #define _countof(x) (sizeof(x)/sizeof((x)[0]))
 #endif
 
-//#define USE_EYETRACKER
+#define USE_EYETRACKER
 
 #ifdef USE_EYETRACKER
 // for threading
@@ -209,7 +209,7 @@ public:
 
     CGLRenderModel *FindOrLoadRenderModel( const char *pchRenderModelName );
 
-private: 
+private:
     bool m_bDebugOpenGL;
     bool m_bVerbose;
     bool m_bPerf;
@@ -221,7 +221,7 @@ private:
     std::string m_strDisplay;
     vr::TrackedDevicePose_t m_rTrackedDevicePose[ vr::k_unMaxTrackedDeviceCount ];
     Matrix4 m_rmat4DevicePose[ vr::k_unMaxTrackedDeviceCount ];
-    
+
     struct ControllerInfo_t
     {
         vr::VRInputValueHandle_t m_source = vr::k_ulInvalidInputValueHandle;
@@ -259,9 +259,9 @@ private: // OpenGL bookkeeping
     char m_rDevClassChar[ vr::k_unMaxTrackedDeviceCount ];   // for each device, a character representing its class
 
     float m_fScale;
-    
+
     int m_iSceneVolumeInit;                                  // if you want something other than the default 20x20x20
-    
+
     float m_fNearClip;
     float m_fFarClip;
 
@@ -326,7 +326,7 @@ private: // OpenGL bookkeeping
     FramebufferDesc rightEyeDesc;
 
     bool CreateFrameBuffer( int nWidth, int nHeight, FramebufferDesc &framebufferDesc );
-    
+
     uint32_t m_nRenderWidth;
     uint32_t m_nRenderHeight;
 
@@ -352,24 +352,37 @@ private: // OpenGL bookkeeping
     Csv m_csv;
 #endif // USE_EYETRACKER
 
-    cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 1172.5f, 0.f, 1024.f, 0.f, 1172.5f, 1024.f, 0.f, 0.f, 1.f);
+    cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 1173.707857f, 0.f, 1025.894071f, 0.f, 1171.142857f, 1027.8555f, 0.f, 0.f, 1.f);
     cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) << -0.02612325714, -0.2002757143, 0.0000088126, 0.00001278283571,
             -0.006831787357, 0.3176116643, -0.28692775, -0.04330581357);
     cv::Mat stereoProjection[2] =
     {
         (cv::Mat_<float>(3, 4) <<
-            1172.5f, 0.f, 1.02300409e+03f, 0.f,
-            0.f, 1172.5f, 7.09133301e+02f, 0.f,
-            0.f, 0.f, 1.f, 0.f),
+            1172.5f, 0.0f, 7396.289253234863f, 0.0f,
+            0.0f, 1172.5f, -2340.8943977355957f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f),
         (cv::Mat_<float>(3, 4) <<
-            1172.5f, 0.f, 1.02300409e+03f, 0.f,
-            0.f, 1172.5f, 7.09133301e+02f, 2.43640485e+03f,
-            0.f, 0.f, 1.f, 0.f)
+            1172.5f, 0.0f, 7396.289253234863f, 0.0f,
+            0.0f, 1172.5f, -2340.8943977355957f, 690.7668232984008f,
+            0.0f, 0.0f, 1.0f, 0.0f)
+    };
+    cv::Mat stereoExtrinsic[2] =
+    {
+        (cv::Mat_<float>(3, 3) <<
+            0.9641028051784121f, -0.2627159118695173f, -0.03855036572699235f,
+            0.26023321459201604f, 0.9060105992387877f, 0.33380153997559503f,
+            -0.05276793600495082f, -0.3318510866601781f, 0.9418547665177663f),
+        (cv::Mat_<float>(3, 3) <<
+            0.9647465784139662f, -0.2528738532067841f, -0.07293047238910921f,
+            0.2564921108327022f, 0.8413298058913102f, 0.4757898220847889f,
+            -0.05895622544846003f, -0.4777226937075986f, 0.8765301999347347f)
     };
 
     void GetMatProjFromStereoIntrinsics(cv::Mat stereoProj,
         unsigned int w, unsigned int h, float znear, float zfar, Matrix4& mat4stProj);
     Matrix4 m_mat4StereoProjection[2];
+
+    bool m_switch = false;
 };
 
 
@@ -635,21 +648,21 @@ bool CMainApplication::BInit()
     SDL_SetWindowTitle( m_pCompanionWindow, strWindowTitle.c_str() );
 
     // Object parameter
-     m_fScale = 1.0f;
- 
-     m_fNearClip = 0.1f;
-     m_fFarClip = 30.0f;
- 
+    m_fScale = 1.0f;
+
+    m_fNearClip = 0.1f;
+    m_fFarClip = 30.0f;
+
     m_iTexture[vr::Eye_Left] = 0;
     m_iTexture[vr::Eye_Right] = 0;
-     m_uiVertcount = 0;
+    m_uiVertcount = 0;
 
     // uEyeCamera Init
     m_vision[vr::Eye_Left].Init(vr::Eye_Left + 1);
     m_vision[vr::Eye_Right].Init(vr::Eye_Right + 1);
- 
+
     UpdateHMDMatrixPose();
-    
+
     if (!BInitGL())
     {
         printf("%s - Unable to initialize OpenGL!\n", __FUNCTION__);
@@ -709,7 +722,7 @@ void APIENTRY DebugCallback(GLenum source, GLenum type, GLuint id, GLenum severi
 // Purpose: Initialize OpenGL. Returns true if OpenGL has been successfully
 //          initialized, false if shaders could not be created.
 //          If failure occurred in a module other than shaders, the function
-//          may return true or throw an error. 
+//          may return true or throw an error.
 //-----------------------------------------------------------------------------
 bool CMainApplication::BInitGL()
 {
@@ -767,7 +780,7 @@ void CMainApplication::Shutdown()
         delete (*i);
     }
     m_vecRenderModels.clear();
-    
+
     if( m_pContext )
     {
         if( m_bDebugOpenGL )
@@ -906,6 +919,10 @@ bool CMainApplication::HandleInput()
                 m_vision[vr::Eye_Left].SetFocus(200, false);
                 m_vision[vr::Eye_Right].SetFocus(181, false);
             }
+            if (sdlEvent.key.keysym.sym == SDLK_i)
+            {
+                m_switch = !m_switch;
+            }
         }
     }
 
@@ -974,7 +991,7 @@ bool CMainApplication::HandleInput()
             m_rHand[eHand].m_rmat4Pose = ConvertSteamVRMatrixToMatrix4( poseData.pose.mDeviceToAbsoluteTracking );
 
             vr::InputOriginInfo_t originInfo;
-            if ( vr::VRInput()->GetOriginTrackedDeviceInfo( poseData.activeOrigin, &originInfo, sizeof( originInfo ) ) == vr::VRInputError_None 
+            if ( vr::VRInput()->GetOriginTrackedDeviceInfo( poseData.activeOrigin, &originInfo, sizeof( originInfo ) ) == vr::VRInputError_None
                 && originInfo.trackedDeviceIndex != vr::k_unTrackedDeviceIndexInvalid )
             {
                 std::string sRenderModelName = GetTrackedDeviceString( originInfo.trackedDeviceIndex, vr::Prop_RenderModelName_String );
@@ -1028,7 +1045,7 @@ void CMainApplication::RunMainLoop()
         }
 
         bQuit = HandleInput();
-        
+
 #ifdef USE_EYETRACKER
         if (tracker.calibrated)
         {
@@ -1036,7 +1053,7 @@ void CMainApplication::RunMainLoop()
 
             if (m_measure)
             {
-                m_csv.WriteGaze(tracker.GetGazeDepth(stereoProjection));
+                m_csv.WriteGaze(tracker.GetGazeDepth(stereoProjection, stereoExtrinsic));
             }
 
             //// Change focus
@@ -1146,7 +1163,7 @@ void CMainApplication::RenderFrame()
     {
         m_iValidPoseCount_Last = m_iValidPoseCount;
         m_iTrackedControllerCount_Last = m_iTrackedControllerCount;
-        
+
         dprintf( "PoseCount:%d(%s) Controllers:%d\n", m_iValidPoseCount, m_strPoseClasses.c_str(), m_iTrackedControllerCount );
     }
 
@@ -1205,7 +1222,7 @@ GLuint CMainApplication::CompileGLShader( const char *pchShaderName, const char 
         }
         glDeleteProgram( unProgramID );
         glDeleteShader( nSceneFragmentShader );
-        return 0;    
+        return 0;
     }
     glAttachShader( unProgramID, nSceneFragmentShader );
     glDeleteShader( nSceneFragmentShader ); // the program hangs onto this once it's attached
@@ -1246,7 +1263,7 @@ bool CMainApplication::CreateAllShaders()
         "out vec2 v2UVcoords;\n"
         "void main()\n"
         "{\n"
-        "    posUV = vec2(position.xy);\n"
+        "    posUV = (vec2(position.xy) + vec2(1.f, 1.f)) / 2;\n"
         "    v2UVcoords = v2UVcoordsIn;\n"
         "    gl_Position = matrix * vec4(position, 1.f);\n"
         "}\n",
@@ -1379,7 +1396,7 @@ bool CMainApplication::CreateAllShaders()
         "}\n"
     );
 
-    return m_unSceneProgramID != 0 
+    return m_unSceneProgramID != 0
         && m_unControllerTransformProgramID != 0
         && m_unRenderModelProgramID != 0
         && m_unCompanionWindowProgramID != 0;
@@ -1415,7 +1432,7 @@ bool CMainApplication::SetupTexturemaps()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    
+
     // null
     glBindTexture( GL_TEXTURE_2D, 0 );
 
@@ -1441,7 +1458,7 @@ void CMainApplication::SetupScene()
 
     AddPlaneMeshToScene(vertdataarray);
     m_uiVertcount = vertdataarray.size() / 5;
-    
+
     glGenVertexArrays( 1, &m_unSceneVAO );
     glBindVertexArray( m_unSceneVAO );
 
@@ -1505,28 +1522,28 @@ void CMainApplication::AddCubeToScene( Matrix4 mat, std::vector<float> &vertdata
     AddVertex( G.x, G.y, G.z, 1, 0, vertdata );
     AddVertex( H.x, H.y, H.z, 0, 0, vertdata );
     AddVertex( E.x, E.y, E.z, 0, 1, vertdata );
-                     
+
     AddVertex( B.x, B.y, B.z, 0, 1, vertdata ); //Back
     AddVertex( A.x, A.y, A.z, 1, 1, vertdata );
     AddVertex( D.x, D.y, D.z, 1, 0, vertdata );
     AddVertex( D.x, D.y, D.z, 1, 0, vertdata );
     AddVertex( C.x, C.y, C.z, 0, 0, vertdata );
     AddVertex( B.x, B.y, B.z, 0, 1, vertdata );
-                    
+
     AddVertex( H.x, H.y, H.z, 0, 1, vertdata ); //Top
     AddVertex( G.x, G.y, G.z, 1, 1, vertdata );
     AddVertex( C.x, C.y, C.z, 1, 0, vertdata );
     AddVertex( C.x, C.y, C.z, 1, 0, vertdata );
     AddVertex( D.x, D.y, D.z, 0, 0, vertdata );
     AddVertex( H.x, H.y, H.z, 0, 1, vertdata );
-                
+
     AddVertex( A.x, A.y, A.z, 0, 1, vertdata ); //Bottom
     AddVertex( B.x, B.y, B.z, 1, 1, vertdata );
     AddVertex( F.x, F.y, F.z, 1, 0, vertdata );
     AddVertex( F.x, F.y, F.z, 1, 0, vertdata );
     AddVertex( E.x, E.y, E.z, 0, 0, vertdata );
     AddVertex( A.x, A.y, A.z, 0, 1, vertdata );
-                    
+
     AddVertex( A.x, A.y, A.z, 0, 1, vertdata ); //Left
     AddVertex( E.x, E.y, E.z, 1, 1, vertdata );
     AddVertex( H.x, H.y, H.z, 1, 0, vertdata );
@@ -1579,22 +1596,24 @@ void CMainApplication::AddPlaneMeshToScene(std::vector<float>& vertdata)
     Vector2 b = Vector2(1, 0);
     Vector2 c = Vector2(1, 1);
     Vector2 d = Vector2(0, 1);
-    Vector2 A = (1.0f / DIV) * a;
-    Vector2 B = (1.0f / DIV) * b;
-    Vector2 C = (1.0f / DIV) * c;
-    Vector2 D = (1.0f / DIV) * d;
-    
+    Vector2 A = (1.0f / DIV) * Vector2(0, 0);
+    Vector2 B = (1.0f / DIV) * Vector2(1, 0);
+    Vector2 C = (1.0f / DIV) * Vector2(1, 1);
+    Vector2 D = (1.0f / DIV) * Vector2(0, 1);
+
+    float zz = 0;
+
     for (int i = 0; i < DIV; i++)
     {
         for (int j = 0; j < DIV; j++)
         {
             Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
-            AddVertex(A.x + ofs.x, A.y + ofs.y, 0, mapx.at<float>(a.x + j, a.y + i), mapy.at<float>(a.x + j, a.y + i), vertdata);
-            AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
-            AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
-            AddVertex(D.x + ofs.x, D.y + ofs.y, 0, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
-            AddVertex(B.x + ofs.x, B.y + ofs.y, 0, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
-            AddVertex(C.x + ofs.x, C.y + ofs.y, 0, mapx.at<float>(c.x + j, c.y + i), mapy.at<float>(c.x + j, c.y + i), vertdata);
+            AddVertex(2 * (A.x + ofs.x) - 1, 2 * (A.y + ofs.y) - 1, zz, mapx.at<float>(a.x + j, a.y + i), mapy.at<float>(a.x + j, a.y + i), vertdata);
+            AddVertex(2 * (B.x + ofs.x) - 1, 2 * (B.y + ofs.y) - 1, zz, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
+            AddVertex(2 * (D.x + ofs.x) - 1, 2 * (D.y + ofs.y) - 1, zz, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
+            AddVertex(2 * (D.x + ofs.x) - 1, 2 * (D.y + ofs.y) - 1, zz, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
+            AddVertex(2 * (B.x + ofs.x) - 1, 2 * (B.y + ofs.y) - 1, zz, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
+            AddVertex(2 * (C.x + ofs.x) - 1, 2 * (C.y + ofs.y) - 1, zz, mapx.at<float>(c.x + j, c.y + i), mapy.at<float>(c.x + j, c.y + i), vertdata);
         }
     }
     std::cout << "Done" << std::endl;
@@ -1638,15 +1657,15 @@ void CMainApplication::RenderControllerAxes()
             vertdataarray.push_back( color.x );
             vertdataarray.push_back( color.y );
             vertdataarray.push_back( color.z );
-        
+
             vertdataarray.push_back( point.x );
             vertdataarray.push_back( point.y );
             vertdataarray.push_back( point.z );
-        
+
             vertdataarray.push_back( color.x );
             vertdataarray.push_back( color.y );
             vertdataarray.push_back( color.z );
-        
+
             m_uiControllerVertcount += 2;
         }
 
@@ -1761,7 +1780,7 @@ bool CMainApplication::SetupStereoRenderTargets()
 
     CreateFrameBuffer( m_nRenderWidth, m_nRenderHeight, leftEyeDesc );
     CreateFrameBuffer( m_nRenderWidth, m_nRenderHeight, rightEyeDesc );
-    
+
     return true;
 }
 
@@ -1828,40 +1847,38 @@ void CMainApplication::RenderStereoTargets()
 
     // Left Eye
     glBindFramebuffer( GL_FRAMEBUFFER, leftEyeDesc.m_nRenderFramebufferId );
-     glViewport(0, 0, m_nRenderWidth, m_nRenderHeight );
-     RenderScene( vr::Eye_Left );
-     glBindFramebuffer( GL_FRAMEBUFFER, 0 );
-    
+    glViewport(0, 0, m_nRenderWidth, m_nRenderHeight );
+    RenderScene( vr::Eye_Left );
+    glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+
     glDisable( GL_MULTISAMPLE );
-         
-     glBindFramebuffer(GL_READ_FRAMEBUFFER, leftEyeDesc.m_nRenderFramebufferId);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, leftEyeDesc.m_nRenderFramebufferId);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, leftEyeDesc.m_nResolveFramebufferId );
 
-    glBlitFramebuffer( 0, 0, m_nRenderWidth, m_nRenderHeight, 0, 0, m_nRenderWidth, m_nRenderHeight, 
-        GL_COLOR_BUFFER_BIT,
-         GL_LINEAR );
+    glBlitFramebuffer( 0, 0, m_nRenderWidth, m_nRenderHeight, 0, 0, m_nRenderWidth, m_nRenderHeight,
+        GL_COLOR_BUFFER_BIT, GL_LINEAR );
 
-     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0 );    
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0 );
 
     glEnable( GL_MULTISAMPLE );
 
     // Right Eye
     glBindFramebuffer( GL_FRAMEBUFFER, rightEyeDesc.m_nRenderFramebufferId );
-     glViewport(0, 0, m_nRenderWidth, m_nRenderHeight );
-     RenderScene( vr::Eye_Right );
-     glBindFramebuffer( GL_FRAMEBUFFER, 0 );
-     
+    glViewport(0, 0, m_nRenderWidth, m_nRenderHeight );
+    RenderScene( vr::Eye_Right );
+    glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+
     glDisable( GL_MULTISAMPLE );
 
-     glBindFramebuffer(GL_READ_FRAMEBUFFER, rightEyeDesc.m_nRenderFramebufferId );
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, rightEyeDesc.m_nRenderFramebufferId );
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, rightEyeDesc.m_nResolveFramebufferId );
-    
-    glBlitFramebuffer( 0, 0, m_nRenderWidth, m_nRenderHeight, 0, 0, m_nRenderWidth, m_nRenderHeight, 
-        GL_COLOR_BUFFER_BIT,
-         GL_LINEAR  );
 
-     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBlitFramebuffer( 0, 0, m_nRenderWidth, m_nRenderHeight, 0, 0, m_nRenderWidth, m_nRenderHeight,
+        GL_COLOR_BUFFER_BIT, GL_LINEAR  );
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0 );
 }
 
@@ -1878,17 +1895,13 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
         glUseProgram( m_unSceneProgramID );
 
         Matrix4 matTransform;
-        matTransform.translate(-0.5f, -0.5f, -0.3f);
-        //matTransform.translate(-0.5f, -0.5f, 0.f);  // new
+        matTransform.translate(0.f, 0.f, -0.5f);
         const Matrix4 &hmd_proj = m_mat4Projection[nEye];
-        //Matrix4 hmd_eye = m_mat4eyePose[nEye];
-        //Matrix4 hmd_pose = m_mat4HMDPose;
-        Matrix4 str_proj = m_mat4StereoProjection[nEye];  // new
         //float ipd = std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Left).m[0][3])
         //    + std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Right).m[0][3]); // scale: m
 
         Matrix4 mvp = hmd_proj * matTransform;
-        //Matrix4 mvp = hmd_proj * str_proj.invert() * matTransform;  // new
+        //mvp.identity();
         glUniformMatrix4fv(m_nSceneMatrixLocation, 1, GL_FALSE, mvp.get());
         glUniform1i(m_nCameraTextureLocation, 0);
 #ifdef USE_EYETRACKER
@@ -1946,13 +1959,13 @@ void CMainApplication::UpdateTexture(vr::Hmd_Eye nEye)
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, nImageWidth, nImageHeight,
             GL_RGBA, GL_UNSIGNED_BYTE, m_vision[nEye].GetImagePtr());
 
-        //—vƒ}ƒ‹ƒ`ƒeƒNƒXƒ`ƒƒ
+        //ï¿½vï¿½}ï¿½ï¿½ï¿½`ï¿½eï¿½Nï¿½Xï¿½`ï¿½ï¿½
         //glTexSubImage2D(GL_TEXTURE_2D, 0, tracker.gazePt[nEye].x, tracker.gazePt[nEye].y, tracker.gazePtImg.cols, tracker.gazePtImg.rows,
         //    GL_BGR, GL_UNSIGNED_BYTE, tracker.gazePtImg.data);
     }
     else
     {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, tracker.gazePtCalib.x, tracker.gazePtCalib.y, tracker.gazePtImg.cols, tracker.gazePtImg.rows,
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tracker.gazePtImg.cols, tracker.gazePtImg.rows,
             GL_BGR, GL_UNSIGNED_BYTE, tracker.gazePtImg.data);
     }
 #else
@@ -2005,8 +2018,8 @@ Matrix4 CMainApplication::GetHMDMatrixProjectionEye( vr::Hmd_Eye nEye )
 
     return Matrix4(
         mat.m[0][0], mat.m[1][0], mat.m[2][0], mat.m[3][0],
-        mat.m[0][1], mat.m[1][1], mat.m[2][1], mat.m[3][1], 
-        mat.m[0][2], mat.m[1][2], mat.m[2][2], mat.m[3][2], 
+        mat.m[0][1], mat.m[1][1], mat.m[2][1], mat.m[3][1],
+        mat.m[0][2], mat.m[1][2], mat.m[2][2], mat.m[3][2],
         mat.m[0][3], mat.m[1][3], mat.m[2][3], mat.m[3][3]
     );
 }
@@ -2044,7 +2057,7 @@ void CMainApplication::GetMatProjFromStereoIntrinsics(cv::Mat stereoProj,
     f.y = stereoProj.at<float>(1, 1);
     c.x = stereoProj.at<float>(0, 2);
     c.y = stereoProj.at<float>(1, 2);
-    
+
     mat4stProj = Matrix4(
         2.f * f.x / w,       0.f,                  0.f,                                  0.f,
         0.f,                 2.f * f.y / h,        0.f,                                  0.f,
@@ -2063,11 +2076,11 @@ Matrix4 CMainApplication::GetHMDMatrixPoseEye( vr::Hmd_Eye nEye )
 
     vr::HmdMatrix34_t matEyeRight = m_pHMD->GetEyeToHeadTransform( nEye );
     Matrix4 matrixObj(
-        matEyeRight.m[0][0], matEyeRight.m[1][0], matEyeRight.m[2][0], 0.f, 
+        matEyeRight.m[0][0], matEyeRight.m[1][0], matEyeRight.m[2][0], 0.f,
         matEyeRight.m[0][1], matEyeRight.m[1][1], matEyeRight.m[2][1], 0.f,
         matEyeRight.m[0][2], matEyeRight.m[1][2], matEyeRight.m[2][2], 0.f,
         matEyeRight.m[0][3], matEyeRight.m[1][3], matEyeRight.m[2][3], 1.f
-        );
+    );
 
     return matrixObj.invert();
 }

@@ -133,15 +133,19 @@ void EyeTrack::CalcurateGaze()
     cv::perspectiveTransform(src_R, gazePt[Eye_Right], matPupilToGaze[Eye_Right]);
 }
 
-cv::Point3f EyeTrack::GetGazeDepth(cv::Mat proj[2])
+cv::Point3f EyeTrack::GetGazeDepth(cv::Mat proj[2], cv::Mat extr[2])
 {
     cv::Mat_<float> p = cv::Mat_<float>::zeros(4, 1);
     cv::triangulatePoints(proj[Eye_Left], proj[Eye_Right], gazePt[Eye_Left], gazePt[Eye_Right], p);
     if (p(3, 0) != 0)
     {
         p /= p(3, 0);
-        gazeDepthPt = cv::Point3f(p(0, 0), p(1, 0), p(2, 0));
+        gazeDepthPt = cv::Vec3f(p(0, 0), p(1, 0), p(2, 0));
         //std::cout << gazeDepthPt << std::endl;
+        std::cout << "0: " << cv::Mat(extr[0] * gazeDepthPt) << std::endl;
+        std::cout << "1: " << cv::Mat(extr[1] * gazeDepthPt) << std::endl;
+        //gazeDepthLen[0] = cv::Mat(extr[0] * gazeDepthPt).at();
+        //gazeDepthLen[1] = cv::Mat(extr[1] * gazeDepthPt);
     }
     return gazeDepthPt;
 }
