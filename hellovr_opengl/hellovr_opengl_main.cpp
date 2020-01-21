@@ -27,6 +27,7 @@
 #endif
 
 // Additonal codes
+#include <Windows.h>
 #include <opencv2/opencv.hpp>
 #include "uEyeCamera.h"
 #include "pupil.h"
@@ -181,6 +182,7 @@ public:
 
     void SetupScene();
     void AddCubeToScene( Matrix4 mat, std::vector<float> &vertdata );
+    void AddVertex(Vector2 vec, float fl2, float fl3, float fl4, std::vector<float>& vertdata);
     void AddVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata );
     void AddPlaneToScene(Matrix4 mat, std::vector<float>& vertdata);  // Add
     void AddPlaneMeshToScene(std::vector<float>& vertdata);  // Add
@@ -308,7 +310,8 @@ private: // OpenGL bookkeeping
     GLuint m_unControllerTransformProgramID;
     GLuint m_unRenderModelProgramID;
 
-    GLint m_nSceneMatrixLocation;
+    GLint m_nSceneMVMatLocation;
+    GLint m_nSceneProjMatLocation;
     GLint m_nCameraTextureLocation;
     GLint m_nCalibBooleanLocation;
     GLint m_nControllerMatrixLocation;
@@ -358,24 +361,24 @@ private: // OpenGL bookkeeping
     cv::Mat stereoProjection[2] =
     {
         (cv::Mat_<float>(3, 4) <<
-            1172.5f, 0.0f, 7396.289253234863f, 0.0f,
-            0.0f, 1172.5f, -2340.8943977355957f, 0.0f,
+            1171.142857f, 0.0f, 1202.3287200927734f, 0.0f,
+            0.0f, 1171.142857f, 1040.7625732421875f, 0.0f,
             0.0f, 0.0f, 1.0f, 0.0f),
         (cv::Mat_<float>(3, 4) <<
-            1172.5f, 0.0f, 7396.289253234863f, 0.0f,
-            0.0f, 1172.5f, -2340.8943977355957f, 690.7668232984008f,
+            1171.142857f, 0.0f, 1202.3287200927734f, 5160.766786411402f,
+            0.0f, 1171.142857f, 1040.7625732421875f, 0.0f,
             0.0f, 0.0f, 1.0f, 0.0f)
     };
     cv::Mat stereoExtrinsic[2] =
     {
         (cv::Mat_<float>(3, 3) <<
-            0.9641028051784121f, -0.2627159118695173f, -0.03855036572699235f,
-            0.26023321459201604f, 0.9060105992387877f, 0.33380153997559503f,
-            -0.05276793600495082f, -0.3318510866601781f, 0.9418547665177663f),
+            0.9998957793184072f, 0.013713811494753097f, -0.004512413491861114f,
+            -0.013712803013002236f, 0.9999059427450887f, 0.0002543552282893076f,
+            0.004515477246288511f, -0.00019245088188694361f, 0.999989786661792f),
         (cv::Mat_<float>(3, 3) <<
-            0.9647465784139662f, -0.2528738532067841f, -0.07293047238910921f,
-            0.2564921108327022f, 0.8413298058913102f, 0.4757898220847889f,
-            -0.05895622544846003f, -0.4777226937075986f, 0.8765301999347347f)
+            0.9983731621833162f, 0.013524257589408667f, -0.055390644415291734f,
+            -0.013536637049247116f, 0.999908364022626f, 0.0001517069308405948f,
+            0.05538762036306415f, 0.0005983429211052606f, 0.9984647482491636f)
     };
 
     void GetMatProjFromStereoIntrinsics(cv::Mat stereoProj,
@@ -494,7 +497,8 @@ CMainApplication::CMainApplication( int argc, char *argv[] )
     , m_glControllerVertBuffer( 0 )
     , m_unControllerVAO( 0 )
     , m_unSceneVAO( 0 )
-    , m_nSceneMatrixLocation(-1)
+    , m_nSceneMVMatLocation(-1)
+    , m_nSceneProjMatLocation(-1)
     , m_nCameraTextureLocation(-1)
     , m_nControllerMatrixLocation( -1 )
     , m_nRenderModelMatrixLocation( -1 )
@@ -881,16 +885,6 @@ bool CMainApplication::HandleInput()
             if (sdlEvent.key.keysym.sym == SDLK_s)
             {
                 m_measure = !m_measure;
-                if (m_measure)
-                {
-                    m_csv.Open();
-                    std::cout << "Start measure" << std::endl;
-                }
-                else
-                {
-                    m_csv.Close();
-                    std::cout << "End measure" << std::endl;
-                }
             }
 #endif // USE_EYETRACKER
             if (sdlEvent.key.keysym.sym == SDLK_RIGHT)
@@ -1031,12 +1025,14 @@ void CMainApplication::RunMainLoop()
     unsigned int baseTime = SDL_GetTicks();
     int frameCount = 0;
 
+    unsigned int startTime = 0;
+
     while ( !bQuit )  // Main loop
     {
         // fps
         frameCount++;
         unsigned int currentTime = SDL_GetTicks();
-        if (currentTime - baseTime >= 1000)
+        if (currentTime - baseTime > 1000)
         {
             float fps = float(frameCount) / (currentTime - baseTime) * 1000;
             printf("fps: %f\r", fps);
@@ -1053,7 +1049,49 @@ void CMainApplication::RunMainLoop()
 
             if (m_measure)
             {
-                m_csv.WriteGaze(tracker.GetGazeDepth(stereoProjection, stereoExtrinsic));
+                if (startTime == 0)
+                {
+                    try
+                    {
+                        int trial = 0;
+                        while (startTime == 0 && trial < 10)
+                        {
+                            startTime = SDL_GetTicks();
+                            trial++;
+                        }
+
+                        if (startTime == 0)
+                            throw "Exception: cannot take startTime";
+                        
+                        m_csv.Open();
+                        std::cout << "Start measure" << std::endl;
+                        Beep(440, 161);
+                    }
+                    catch (char* str)
+                    {
+                        std::cout << str << std::endl;
+                        Beep(440, 161);
+                        Beep(440, 161);
+                        Beep(440, 161);
+
+                        startTime = 0;
+                        m_measure = false;
+                    }
+                }
+                else
+                {
+                    m_csv.WriteGaze(tracker.GetGazeDepth(stereoProjection, stereoExtrinsic));
+
+                    if (currentTime - startTime > 10000) // 10 s
+                    {
+                        m_csv.Close();
+                        std::cout << "End measure" << std::endl;
+                        Beep(554, 128);
+
+                        startTime = 0;
+                        m_measure = false;
+                    }
+                }
             }
 
             //// Change focus
@@ -1255,7 +1293,8 @@ bool CMainApplication::CreateAllShaders()
 
         // vertex shader
         "#version 410\n"
-        "uniform mat4 matrix;\n"
+        "uniform mat3 modelview;\n"
+        "uniform mat4 projection;\n"
         "layout(location = 0) in vec3 position;\n"
         "layout(location = 1) in vec2 v2UVcoordsIn;\n"
         "layout(location = 2) in vec3 v3NormalIn;\n"
@@ -1263,9 +1302,9 @@ bool CMainApplication::CreateAllShaders()
         "out vec2 v2UVcoords;\n"
         "void main()\n"
         "{\n"
-        "    posUV = (vec2(position.xy) + vec2(1.f, 1.f)) / 2;\n"
+        "    posUV = vec2(position.xy) / 2048.f;\n"
         "    v2UVcoords = v2UVcoordsIn;\n"
-        "    gl_Position = matrix * vec4(position, 1.f);\n"
+        "    gl_Position = projection * vec4(modelview * position, 1.f);\n"
         "}\n",
 
         // Fragment Shader
@@ -1288,10 +1327,16 @@ bool CMainApplication::CreateAllShaders()
         "   }\n"
         "}\n"
     );
-    m_nSceneMatrixLocation = glGetUniformLocation( m_unSceneProgramID, "matrix" );
-    if( m_nSceneMatrixLocation == -1 )
+    m_nSceneMVMatLocation = glGetUniformLocation(m_unSceneProgramID, "modelview");
+    if (m_nSceneMVMatLocation == -1)
     {
-        dprintf( "Unable to find matrix uniform in scene shader\n" );
+        dprintf("Unable to find modelview matrix uniform in scene shader\n");
+        return false;
+    }
+    m_nSceneProjMatLocation = glGetUniformLocation( m_unSceneProgramID, "projection" );
+    if( m_nSceneProjMatLocation == -1 )
+    {
+        dprintf( "Unable to find projection matrix uniform in scene shader\n" );
         return false;
     }
     m_nCameraTextureLocation = glGetUniformLocation(m_unSceneProgramID, "camera");
@@ -1419,8 +1464,8 @@ bool CMainApplication::SetupTexturemaps()
     glBindTexture(GL_TEXTURE_2D, m_iTexture[vr::Eye_Left]);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, nTextureWidth, nTextureHeight,
         0, GL_RGBA, GL_UNSIGNED_BYTE, m_vision[vr::Eye_Left].GetImagePtr());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
@@ -1428,8 +1473,8 @@ bool CMainApplication::SetupTexturemaps()
     glBindTexture(GL_TEXTURE_2D, m_iTexture[vr::Eye_Right]);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, nTextureWidth, nTextureHeight,
         0, GL_RGBA, GL_UNSIGNED_BYTE, m_vision[vr::Eye_Right].GetImagePtr());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
@@ -1487,6 +1532,17 @@ void CMainApplication::SetupScene()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
+void CMainApplication::AddVertex(Vector2 vec, float fl2, float fl3, float fl4, std::vector<float>& vertdata)
+{
+    // (x, y, z) = (f10, f11, f12)
+    vertdata.push_back(vec.x);
+    vertdata.push_back(vec.y);
+    vertdata.push_back(fl2);
+    // (u, v) = (f13, f14)
+    vertdata.push_back(fl3);
+    vertdata.push_back(fl4);
+}
+
 void CMainApplication::AddVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata )
 {
     // (x, y, z) = (f10, f11, f12)
@@ -1596,24 +1652,22 @@ void CMainApplication::AddPlaneMeshToScene(std::vector<float>& vertdata)
     Vector2 b = Vector2(1, 0);
     Vector2 c = Vector2(1, 1);
     Vector2 d = Vector2(0, 1);
-    Vector2 A = (1.0f / DIV) * Vector2(0, 0);
-    Vector2 B = (1.0f / DIV) * Vector2(1, 0);
-    Vector2 C = (1.0f / DIV) * Vector2(1, 1);
-    Vector2 D = (1.0f / DIV) * Vector2(0, 1);
-
-    float zz = 0;
+    Vector2 A = (1.f / DIV) * Vector2(0, 0);
+    Vector2 B = (1.f / DIV) * Vector2(1, 0);
+    Vector2 C = (1.f / DIV) * Vector2(1, 1);
+    Vector2 D = (1.f / DIV) * Vector2(0, 1);
 
     for (int i = 0; i < DIV; i++)
     {
         for (int j = 0; j < DIV; j++)
         {
             Vector2 ofs = Vector2(1.0f / DIV * j, 1.0f / DIV * i);
-            AddVertex(2 * (A.x + ofs.x) - 1, 2 * (A.y + ofs.y) - 1, zz, mapx.at<float>(a.x + j, a.y + i), mapy.at<float>(a.x + j, a.y + i), vertdata);
-            AddVertex(2 * (B.x + ofs.x) - 1, 2 * (B.y + ofs.y) - 1, zz, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
-            AddVertex(2 * (D.x + ofs.x) - 1, 2 * (D.y + ofs.y) - 1, zz, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
-            AddVertex(2 * (D.x + ofs.x) - 1, 2 * (D.y + ofs.y) - 1, zz, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
-            AddVertex(2 * (B.x + ofs.x) - 1, 2 * (B.y + ofs.y) - 1, zz, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
-            AddVertex(2 * (C.x + ofs.x) - 1, 2 * (C.y + ofs.y) - 1, zz, mapx.at<float>(c.x + j, c.y + i), mapy.at<float>(c.x + j, c.y + i), vertdata);
+            AddVertex(2048 * (A + ofs), 1, mapx.at<float>(a.x + j, a.y + i), mapy.at<float>(a.x + j, a.y + i), vertdata);
+            AddVertex(2048 * (B + ofs), 1, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
+            AddVertex(2048 * (D + ofs), 1, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
+            AddVertex(2048 * (D + ofs), 1, mapx.at<float>(d.x + j, d.y + i), mapy.at<float>(d.x + j, d.y + i), vertdata);
+            AddVertex(2048 * (B + ofs), 1, mapx.at<float>(b.x + j, b.y + i), mapy.at<float>(b.x + j, b.y + i), vertdata);
+            AddVertex(2048 * (C + ofs), 1, mapx.at<float>(c.x + j, c.y + i), mapy.at<float>(c.x + j, c.y + i), vertdata);
         }
     }
     std::cout << "Done" << std::endl;
@@ -1894,15 +1948,18 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
     {
         glUseProgram( m_unSceneProgramID );
 
-        Matrix4 matTransform;
-        matTransform.translate(0.f, 0.f, -0.5f);
-        const Matrix4 &hmd_proj = m_mat4Projection[nEye];
-        //float ipd = std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Left).m[0][3])
-        //    + std::fabs(m_pHMD->GetEyeToHeadTransform(vr::Eye_Right).m[0][3]); // scale: m
+        Matrix3 zAxisInv = Matrix3(
+            1.f, 0.f, 0.f,
+            0.f, 1.f, 0.f,
+            0.f, 0.f, -1.f
+        );
+        Matrix3 modelview = zAxisInv * Matrix3((float*)cv::Mat((stereoExtrinsic[nEye] * cam_mat.inv()).t()).data);
+        glUniformMatrix3fv(m_nSceneMVMatLocation, 1, GL_FALSE, modelview.get());
 
-        Matrix4 mvp = hmd_proj * matTransform;
-        //mvp.identity();
-        glUniformMatrix4fv(m_nSceneMatrixLocation, 1, GL_FALSE, mvp.get());
+        Matrix4 projection = m_mat4Projection[nEye];
+        // projection.identity(); 
+        glUniformMatrix4fv(m_nSceneProjMatLocation, 1, GL_FALSE, projection.get());
+
         glUniform1i(m_nCameraTextureLocation, 0);
 #ifdef USE_EYETRACKER
         glUniform1i(m_nCalibBooleanLocation, tracker.calibrated);
@@ -1959,7 +2016,7 @@ void CMainApplication::UpdateTexture(vr::Hmd_Eye nEye)
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, nImageWidth, nImageHeight,
             GL_RGBA, GL_UNSIGNED_BYTE, m_vision[nEye].GetImagePtr());
 
-        //�v�}���`�e�N�X�`��
+        // 要マルチテクスチャ
         //glTexSubImage2D(GL_TEXTURE_2D, 0, tracker.gazePt[nEye].x, tracker.gazePt[nEye].y, tracker.gazePtImg.cols, tracker.gazePtImg.rows,
         //    GL_BGR, GL_UNSIGNED_BYTE, tracker.gazePtImg.data);
     }

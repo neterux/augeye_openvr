@@ -142,8 +142,8 @@ cv::Point3f EyeTrack::GetGazeDepth(cv::Mat proj[2], cv::Mat extr[2])
         p /= p(3, 0);
         gazeDepthPt = cv::Vec3f(p(0, 0), p(1, 0), p(2, 0));
         //std::cout << gazeDepthPt << std::endl;
-        std::cout << "0: " << cv::Mat(extr[0] * gazeDepthPt) << std::endl;
-        std::cout << "1: " << cv::Mat(extr[1] * gazeDepthPt) << std::endl;
+        //std::cout << "0: " << cv::Mat(extr[0] * gazeDepthPt) << std::endl;
+        //std::cout << "1: " << cv::Mat(extr[1] * gazeDepthPt) << std::endl;
         //gazeDepthLen[0] = cv::Mat(extr[0] * gazeDepthPt).at();
         //gazeDepthLen[1] = cv::Mat(extr[1] * gazeDepthPt);
     }
