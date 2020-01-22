@@ -31,7 +31,7 @@ void Pupil::Get(float *center_x, float *center_y, int *nEye)
     
     //std::cout << "confidence: " << data.confidence << std::endl;
     //std::cout << "center: (" << data.center[0] << ", " << data.center[1] << ")" << std::endl;
-    if (data.confidence > 0.6)
+    if (data.confidence > 0.4)
     {
         if (data.id == 0)  // Right
         {
@@ -63,17 +63,20 @@ void Pupil::Get(float* center_x, float* center_y, int nEye)
 
     //std::cout << "confidence: " << data.confidence << std::endl;
     //std::cout << "center: (" << data.center[0] << ", " << data.center[1] << ")" << std::endl;
-    if (data.id == nEye && data.confidence > 0.6)
+
+    // data.id = 0, nEye = 1: Right eye
+    // data.id = 1, nEye = 0: Left eye
+    if (data.id == !nEye && data.confidence > 0.4)
     {
-        if (nEye == 0)  // Right
-        {
-            *center_x = data.center[0];
-            *center_y = data.center[1];
-        }
-        if (nEye == 1)  // Left
+        if (nEye == 1)  // vr::Eye_Right : data.id = 0
         {
             *center_x = 320 - data.center[0];
             *center_y = 240 - data.center[1];
+        }
+        if (nEye == 0)  // vr::Eye_Left : data.id = 1
+        {
+            *center_x = data.center[0];
+            *center_y = data.center[1];
         }
     }
 }
