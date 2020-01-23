@@ -90,10 +90,18 @@ void EyeTrack::Calibrate()
     }
     else
     {
+        std::vector<cv::Vec2f> correctedGazeCalibPts = {
+            gazeCalibPts[2],
+            gazeCalibPts[3],
+            gazeCalibPts[0],
+            gazeCalibPts[1]
+        };
+
         for (int nEye = 0; nEye < 2; nEye++)
         {
             std::cout << pupilCalibPts[nEye] << std::endl;
-            matPupilToGaze[nEye] = cv::getPerspectiveTransform(pupilCalibPts[nEye], gazeCalibPts);
+            matPupilToGaze[nEye] = cv::getPerspectiveTransform(pupilCalibPts[nEye], correctedGazeCalibPts);
+            std::cout << matPupilToGaze[nEye] << std::endl;
 
             //for (int ax = 0; ax < 2; ax++)
             //{

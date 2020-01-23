@@ -29,7 +29,6 @@ public:
 
     MSGPACK_DEFINE_MAP(topic, confidence, MSGPACK_BASE_MAP(ellipse),
         diameter, norm_pos, timestamp, method, id);
-
 };
 /*
 2D
@@ -89,9 +88,6 @@ class Pupil
 {
 public:
     Pupil();
-    //~Pupil();
-
-    void Get(float *center_x, float *center_y, int *nEye);
     void Get(float* center_x, float* center_y, int nEye);
 
 private:
@@ -100,5 +96,4 @@ private:
     zmq::socket_t _sub;
 
     std::string _decode(zmq::message_t *msg);
-
 };

@@ -16,38 +16,6 @@ Pupil::Pupil()
     _sub.setsockopt(ZMQ_SUBSCRIBE, "pupil.", 6);
 }
 
-void Pupil::Get(float *center_x, float *center_y, int *nEye)
-{
-    zmq::message_t topic, msg;
-    _sub.recv(&topic);
-    _sub.recv(&msg);
-
-    msgpack::object_handle oh = msgpack::unpack(static_cast<char*>(msg.data()), msg.size());
-    msgpack::object obj = oh.get();
-    //std::cout << obj << std::endl;
-
-    pupil_data data;
-    obj.convert(data);
-    
-    //std::cout << "confidence: " << data.confidence << std::endl;
-    //std::cout << "center: (" << data.center[0] << ", " << data.center[1] << ")" << std::endl;
-    if (data.confidence > 0.4)
-    {
-        if (data.id == 0)  // Right
-        {
-            *nEye = 1;  // vr::Eye_Right
-            *center_x = 320 - data.center[0];
-            *center_y = 240 - data.center[1];
-        }
-        if (data.id == 1)  // Left
-        {
-            *nEye = 0;  // vr::Eye_Left
-            *center_x = data.center[0];
-            *center_y = data.center[1];
-        }
-    }
-}
-
 void Pupil::Get(float* center_x, float* center_y, int nEye)
 {
     zmq::message_t topic, msg;
@@ -68,16 +36,8 @@ void Pupil::Get(float* center_x, float* center_y, int nEye)
     // data.id = 1, nEye = 0: Left eye
     if (data.id == !nEye && data.confidence > 0.4)
     {
-        if (nEye == 1)  // vr::Eye_Right : data.id = 0
-        {
-            *center_x = 320 - data.center[0];
-            *center_y = 240 - data.center[1];
-        }
-        if (nEye == 0)  // vr::Eye_Left : data.id = 1
-        {
-            *center_x = data.center[0];
-            *center_y = data.center[1];
-        }
+        *center_x = data.center[0];
+        *center_y = data.center[1];
     }
 }
 
