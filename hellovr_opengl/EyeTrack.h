@@ -26,8 +26,8 @@ public:
 
     cv::Point2f gazePtCalib;
     std::vector<cv::Vec2f> gazePt[2];
-    cv::Vec3f gazeDepthPt;
-    float gazeDepthLen[2];
+    cv::Mat gazeDepthPt;
+    float gazeDepthLen;
     cv::Mat gazePtImg;  // reference point image variable for calibration
 
     std::vector<cv::Point2f> gazeError[2];
@@ -52,6 +52,7 @@ private:
 
 public:
     void Calibrate();
-    void CalcurateGaze();
-    cv::Point3f GetGazeDepth(cv::Mat proj[2], cv::Mat extr[2]);
+    void CalcurateGaze(cv::Mat proj[2], cv::Mat rot);
+    cv::Point3f GetGazeDepthPt();
+    float GetGazeDepthLen();
 };

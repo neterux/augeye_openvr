@@ -99,8 +99,8 @@ void EyeTrack::Calibrate()
 
         for (int nEye = 0; nEye < 2; nEye++)
         {
-            std::cout << pupilCalibPts[nEye] << std::endl;
             matPupilToGaze[nEye] = cv::getPerspectiveTransform(pupilCalibPts[nEye], correctedGazeCalibPts);
+            std::cout << "Homography matrix: Eye" << nEye << std::endl;
             std::cout << matPupilToGaze[nEye] << std::endl;
 
             //for (int ax = 0; ax < 2; ax++)
@@ -124,7 +124,7 @@ void EyeTrack::Calibrate()
     }
 }
 
-void EyeTrack::CalcurateGaze()
+void EyeTrack::CalcurateGaze(cv::Mat proj[2], cv::Mat rot)
 {
     std::vector<cv::Vec2f> src_R, src_L;
     {
@@ -139,21 +139,25 @@ void EyeTrack::CalcurateGaze()
 
     cv::perspectiveTransform(src_L, gazePt[Eye_Left], matPupilToGaze[Eye_Left]);
     cv::perspectiveTransform(src_R, gazePt[Eye_Right], matPupilToGaze[Eye_Right]);
-}
 
-cv::Point3f EyeTrack::GetGazeDepth(cv::Mat proj[2], cv::Mat extr[2])
-{
     cv::Mat_<float> p = cv::Mat_<float>::zeros(4, 1);
     cv::triangulatePoints(proj[Eye_Left], proj[Eye_Right], gazePt[Eye_Left], gazePt[Eye_Right], p);
     if (p(3, 0) != 0)
     {
         p /= p(3, 0);
-        gazeDepthPt = cv::Vec3f(p(0, 0), p(1, 0), p(2, 0));
-        //std::cout << gazeDepthPt << std::endl;
-        //std::cout << "0: " << cv::Mat(extr[0] * gazeDepthPt) << std::endl;
-        //std::cout << "1: " << cv::Mat(extr[1] * gazeDepthPt) << std::endl;
-        //gazeDepthLen[0] = cv::Mat(extr[0] * gazeDepthPt).at();
-        //gazeDepthLen[1] = cv::Mat(extr[1] * gazeDepthPt);
+        gazeDepthPt = (cv::Mat_<float>(3, 1) << p(0, 0), p(1, 0), p(2, 0));
+
+        gazeDepthLen = cv::Mat(rot * gazeDepthPt).at<float>(2, 0);
+        // std::cout << "Depth: " << gazeDepthLen << std::endl;
     }
+}
+
+cv::Point3f EyeTrack::GetGazeDepthPt()
+{
     return gazeDepthPt;
+}
+
+float EyeTrack::GetGazeDepthLen()
+{
+    return gazeDepthLen;
 }

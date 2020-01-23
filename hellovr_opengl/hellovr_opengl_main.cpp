@@ -381,9 +381,8 @@ private: // OpenGL bookkeeping
             -0.038349459966505836f, -0.002129214794434451f, 0.9992621204492024f)
     };
 
-    void GetMatProjFromStereoIntrinsics(cv::Mat stereoProj,
-        unsigned int w, unsigned int h, float znear, float zfar, Matrix4& mat4stProj);
-    Matrix4 m_mat4StereoProjection[2];
+    cv::Mat GetRotMatFromStereoProj(cv::Mat stProj);
+    cv::Mat stereoRotation;
 
     bool m_switch = false;
 };
@@ -679,10 +678,7 @@ bool CMainApplication::BInit()
         return false;
     }
 
-    GetMatProjFromStereoIntrinsics(stereoProjection[vr::Eye_Left],
-        nImageWidth, nImageHeight, m_fNearClip, m_fFarClip, m_mat4StereoProjection[vr::Eye_Left]);
-    GetMatProjFromStereoIntrinsics(stereoProjection[vr::Eye_Right],
-        nImageWidth, nImageHeight, m_fNearClip, m_fFarClip, m_mat4StereoProjection[vr::Eye_Right]);
+    stereoRotation = GetRotMatFromStereoProj(stereoProjection[vr::Eye_Left]);
 #ifdef USE_EYETRACKER
     // init EyeTrack
     tracker.Init(nImageWidth, nImageHeight);
@@ -1045,7 +1041,7 @@ void CMainApplication::RunMainLoop()
 #ifdef USE_EYETRACKER
         if (tracker.calibrated)
         {
-            tracker.CalcurateGaze();
+            tracker.CalcurateGaze(stereoProjection, stereoRotation);
 
             if (m_measure)
             {
@@ -1080,7 +1076,7 @@ void CMainApplication::RunMainLoop()
                 }
                 else
                 {
-                    m_csv.WriteGaze(tracker.GetGazeDepth(stereoProjection, stereoExtrinsic));
+                    m_csv.WriteGaze(tracker.GetGazeDepthPt());
 
                     if (currentTime - startTime > 5000) // 5 s
                     {
@@ -2106,21 +2102,14 @@ Matrix3 CMainApplication::GetIntrinsicsFromHMDProjection(vr::Hmd_Eye nEye, bool 
     );
 }
 
-void CMainApplication::GetMatProjFromStereoIntrinsics(cv::Mat stereoProj,
-    unsigned int w, unsigned int h, float znear, float zfar, Matrix4& mat4stProj)
+cv::Mat CMainApplication::GetRotMatFromStereoProj(cv::Mat stProj)
 {
-    Vector2 f, c;
-    f.x = stereoProj.at<float>(0, 0);
-    f.y = stereoProj.at<float>(1, 1);
-    c.x = stereoProj.at<float>(0, 2);
-    c.y = stereoProj.at<float>(1, 2);
-
-    mat4stProj = Matrix4(
-        2.f * f.x / w,       0.f,                  0.f,                                  0.f,
-        0.f,                 2.f * f.y / h,        0.f,                                  0.f,
-        1.f - 2.f * c.x / w, -1.f + 2.f * c.y / h, -(zfar + znear) / (zfar - znear),     -1.f,
-        0.f,                 0.f,                  -2.f * zfar * znear / (zfar - znear), 0.f
-    );
+    cv::Mat stRot = (cv::Mat_<float>(3, 3) <<
+        stProj.at<float>(0, 0) / cam_mat.at<float>(0, 0), 0.f, (stProj.at<float>(0, 0) - cam_mat.at<float>(0, 2)) / cam_mat.at<float>(0, 0),
+        0.f, stProj.at<float>(1, 1) / cam_mat.at<float>(1, 1), (stProj.at<float>(1, 2) - cam_mat.at<float>(1, 2)) / cam_mat.at<float>(1, 1),
+        0.f, 0.f, 1.f
+        );
+    return stRot;
 }
 
 //-----------------------------------------------------------------------------
