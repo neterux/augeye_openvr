@@ -79,8 +79,13 @@ void uEyeCamera::SetFocus(int value, bool bAddition)
         focus = value;
     if (focus > (int)focMax) focus = focMax;
     if (focus < (int)focMin) focus = focMin;
+
     is_Focus(_camId, FOC_CMD_SET_MANUAL_FOCUS, &focus, 4);
-    std::cout << "Camera" << _camId << ": " << focus << std::endl;
+    // std::cout << "Camera" << _camId << ": " << focus << std::endl;
+    
+    INT nValue = 0;
+    unsigned int ret = is_Focus(_camId, FOC_CMD_GET_AUTOFOCUS_STATUS, (void*)&nValue, sizeof(nValue));
+    //std::cout << "Cam" << _camId << ": " << ret << std::endl;
 }
 
 int uEyeCamera::GetId() const

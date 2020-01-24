@@ -17,12 +17,6 @@ public:
     std::mutex mtx;
 
     cv::Vec2f pupilCenterPt[2];
-    //struct pupilPt
-    //{
-    //    float x;
-    //    float y;
-    //};
-    //std::atomic<pupilPt> pupilCenterPt[2];
 
     cv::Point2f gazePtCalib;
     std::vector<cv::Vec2f> gazePt[2];

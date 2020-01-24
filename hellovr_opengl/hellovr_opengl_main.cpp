@@ -73,9 +73,6 @@ void GetPupil(std::mutex& mtx, int nEye, cv::Vec2f& pt)
                 //std::lock_guard<std::mutex> lock(mtx);
                 eyecam.Get(&pt[0], &pt[1], nEye);
             }
-            //EyeTrack::pupilPt pt;
-            //eyecam.Get(&pt.x, &pt.y, nEye);
-            //pupilCenterPt.store(pt);
             check_threadexit();
         }
     }
@@ -1012,11 +1009,6 @@ void CMainApplication::RunMainLoop()
     std::thread t_eyetrack_R(GetPupil, std::ref(tracker.mtx), vr::Eye_Right, std::ref(tracker.pupilCenterPt[vr::Eye_Right]));
 #endif // USE_EYETRACKER
 
-    //// focus
-    //bool bGazePtChangeL = false;
-    //bool bGazePtChangeR = false;
-    //int focus[2][2] = { {289, 234}, {270, 215} };
-
     // fps
     unsigned int baseTime = SDL_GetTicks();
     int frameCount = 0;
@@ -1031,7 +1023,7 @@ void CMainApplication::RunMainLoop()
         if (currentTime - baseTime > 1000)
         {
             float fps = float(frameCount) / (currentTime - baseTime) * 1000;
-            printf("fps: %f\r", fps);
+            printf("%70s: %.2f]\r", "[fps", fps);
             baseTime = SDL_GetTicks();
             frameCount = 0;
         }
@@ -1042,6 +1034,13 @@ void CMainApplication::RunMainLoop()
         if (tracker.calibrated)
         {
             tracker.CalcurateGaze(stereoProjection, stereoRotation);
+
+            // Change focus
+            int focus[2];
+            focus[vr::Eye_Left] = (-20.f / 7.f) * tracker.gazeDepthLen + 280;
+            focus[vr::Eye_Right] = (-20.f / 7.f) * tracker.gazeDepthLen + 280 + 20;
+            m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left], false);
+            m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right], false);
 
             if (m_measure)
             {
@@ -1089,22 +1088,6 @@ void CMainApplication::RunMainLoop()
                     }
                 }
             }
-
-            //// Change focus
-            //if (tracker.gazePt.y < 980 && !bGazePtChangeL) // 1024
-            //{
-            //    m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left][0], false);
-            //    m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right][0], false);
-            //    bGazePtChangeL = true;
-            //    bGazePtChangeR = false;
-            //}
-            //if (tracker.gazePt.y > 980 && !bGazePtChangeR)
-            //{
-            //    m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left][1], false);
-            //    m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right][1], false);
-            //    bGazePtChangeL = false;
-            //    bGazePtChangeR = true;
-            //}
         }
         else
         {

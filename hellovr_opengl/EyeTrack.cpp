@@ -41,10 +41,6 @@ void EyeTrack::Calibrate()
             pupilPtStack[Eye_Left].push_back(pupilCenterPt[Eye_Left]);
             pupilPtStack[Eye_Right].push_back(pupilCenterPt[Eye_Right]);
         }
-        //auto pt = pupilCenterPt[Eye_Left].load();
-        //pupilPtStack[Eye_Left].push_back(cv::Point2f(pt.x, pt.y));
-        //pt = pupilCenterPt[Eye_Right].load();
-        //pupilPtStack[Eye_Right].push_back(cv::Point2f(pt.x, pt.y));
 
         if (SDL_GetTicks() - pressTime > 5000)
         {
@@ -132,10 +128,6 @@ void EyeTrack::CalcurateGaze(cv::Mat proj[2], cv::Mat rot)
         src_L.push_back(pupilCenterPt[Eye_Left]);
         src_R.push_back(pupilCenterPt[Eye_Right]);
     }
-    //auto pt = pupilCenterPt[Eye_Left].load();
-    //src_L.push_back(cv::Point2f(pt.x, pt.y));
-    //pt = pupilCenterPt[Eye_Right].load();
-    //src_R.push_back(cv::Point2f(pt.x, pt.y));
 
     cv::perspectiveTransform(src_L, gazePt[Eye_Left], matPupilToGaze[Eye_Left]);
     cv::perspectiveTransform(src_R, gazePt[Eye_Right], matPupilToGaze[Eye_Right]);
@@ -147,7 +139,8 @@ void EyeTrack::CalcurateGaze(cv::Mat proj[2], cv::Mat rot)
         p /= p(3, 0);
         gazeDepthPt = (cv::Mat_<float>(3, 1) << p(0, 0), p(1, 0), p(2, 0));
 
-        gazeDepthLen = cv::Mat(rot * gazeDepthPt).at<float>(2, 0);
+        gazeDepthLen = gazeDepthPt.at<float>(2, 0);
+        //gazeDepthLen = cv::Mat(rot * gazeDepthPt).at<float>(2, 0);
         // std::cout << "Depth: " << gazeDepthLen << std::endl;
     }
 }
