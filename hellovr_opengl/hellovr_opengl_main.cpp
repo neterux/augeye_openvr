@@ -1035,12 +1035,12 @@ void CMainApplication::RunMainLoop()
         {
             tracker.CalcurateGaze(stereoProjection, stereoRotation);
 
-            // Change focus
-            int focus[2];
-            focus[vr::Eye_Left] = (-20.f / 7.f) * tracker.gazeDepthLen + 280;
-            focus[vr::Eye_Right] = (-20.f / 7.f) * tracker.gazeDepthLen + 280 + 20;
-            m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left], false);
-            m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right], false);
+            //// Change focus
+            //int focus[2];
+            //focus[vr::Eye_Left] = (-20.f / 7.f) * tracker.gazeDepthLen + 280;
+            //focus[vr::Eye_Right] = (-20.f / 7.f) * tracker.gazeDepthLen + 280 + 20;
+            //m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left], false);
+            //m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right], false);
 
             if (m_measure)
             {

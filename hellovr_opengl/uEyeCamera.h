@@ -24,4 +24,9 @@ private:
 
     int focus;
     UINT focMax, focMin;
+
+    INT lastError;
+    char* lastErrorString;
+    const unsigned short bufferLen = 128;
+    char myErrorBuffer[128];
 };

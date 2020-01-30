@@ -23,10 +23,10 @@ uEyeCamera::~uEyeCamera()
 void uEyeCamera::Init(int CameraId)
 {
     _camId = CameraId;
-    if (is_InitCamera(&_camId, NULL) != IS_SUCCESS)
+    if (is_InitCamera(&_camId, nullptr) != IS_SUCCESS)
         std::cout << "Camera" << CameraId << " init failed" << std::endl;
     
-    if (is_ParameterSet(_camId, IS_PARAMETERSET_CMD_LOAD_EEPROM, NULL, NULL) != IS_SUCCESS)
+    if (is_ParameterSet(_camId, IS_PARAMETERSET_CMD_LOAD_EEPROM, nullptr, NULL) != IS_SUCCESS)
         std::cout << "Camera" << CameraId << " ParameterSet failed" << std::endl;
 
     if (is_SetColorMode(_camId, IS_CM_RGBA8_PACKED) != IS_SUCCESS)
@@ -83,9 +83,20 @@ void uEyeCamera::SetFocus(int value, bool bAddition)
     is_Focus(_camId, FOC_CMD_SET_MANUAL_FOCUS, &focus, 4);
     // std::cout << "Camera" << _camId << ": " << focus << std::endl;
     
+    // Error check
     INT nValue = 0;
-    unsigned int ret = is_Focus(_camId, FOC_CMD_GET_AUTOFOCUS_STATUS, (void*)&nValue, sizeof(nValue));
-    //std::cout << "Cam" << _camId << ": " << ret << std::endl;
+    INT ret = is_Focus(_camId, FOC_CMD_GET_AUTOFOCUS_STATUS, (void*)&nValue, sizeof(nValue));
+    if (ret != IS_SUCCESS)
+    {
+        INT nRet = is_GetError(_camId, &lastError, &lastErrorString);
+        if (nRet == IS_SUCCESS)
+        {
+            memset(myErrorBuffer, 0, bufferLen);
+            strncpy_s(myErrorBuffer, lastErrorString, bufferLen);
+            lastErrorString = 0;
+            std::cout << "uEye Error - code " << ret << ": " << myErrorBuffer << std::endl;
+        }
+    }
 }
 
 int uEyeCamera::GetId() const
