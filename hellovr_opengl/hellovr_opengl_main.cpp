@@ -352,31 +352,45 @@ private: // OpenGL bookkeeping
     Csv m_csv;
 #endif // USE_EYETRACKER
 
-    cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 1173.707857f, 0.f, 1025.894071f, 0.f, 1171.142857f, 1027.8555f, 0.f, 0.f, 1.f);
-    cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) << -0.02612325714, -0.2002757143, 0.0000088126, 0.00001278283571,
-            -0.006831787357, 0.3176116643, -0.28692775, -0.04330581357);
+    cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 
+        1173.707857f, 0.f, 1025.894071f, 0.f, 1171.142857f, 1027.8555f, 0.f, 0.f, 1.f
+        );
+    cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) <<
+        -0.02612325714, -0.2002757143, 0.0000088126, 0.00001278283571,
+        -0.006831787357, 0.3176116643, -0.28692775, -0.04330581357
+        );
     cv::Mat stereoProjection[2] =
     {
         (cv::Mat_<float>(3, 4) <<
             1171.142857f, 0.0f, 905.379150390625f, 0.0f,
             0.0f, 1171.142857f, 1042.0221252441406f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f),
+            0.0f, 0.0f, 1.0f, 0.0f
+            ),
         (cv::Mat_<float>(3, 4) <<
             1171.142857f, 0.0f, 905.379150390625f, -5544.42210211908f,
             0.0f, 1171.142857f, 1042.0221252441406f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f)
+            0.0f, 0.0f, 1.0f, 0.0f
+            )
     };
     cv::Mat stereoExtrinsic[2] =
     {
         (cv::Mat_<float>(3, 3) <<
             0.9999725095623059f, -0.00016472704364711046f, 0.007413028036163952f,
             0.00017979751716516474f, 0.9999979186093164f, -0.002032350827954094f,
-            -0.007412677823612922f, 0.0020336278017758637f, 0.9999704578463541f),
+            -0.007412677823612922f, 0.0020336278017758637f, 0.9999704578463541f
+            ),
         (cv::Mat_<float>(3, 3) <<
             0.9992515071397762f, 0.004995904225059745f, 0.03835969785934022f,
             -0.005073893885686473f, 0.9999852535839383f, 0.0019360308632875075f,
-            -0.038349459966505836f, -0.002129214794434451f, 0.9992621204492024f)
+            -0.038349459966505836f, -0.002129214794434451f, 0.9992621204492024f
+            )
     };
+    cv::Mat stereoTransform = (cv::Mat_<float>(4, 4) <<
+        0.9690516151299597f, 0.006095427141919074f, -0.08110809076829564f, 1.798335537876599f,
+        -0.01204326353822742f, 0.9840521082467288f, 0.006548634379593075f, -0.3661739366694684f,
+        -0.11356185011600196f, 0.06314522988791935f, 0.5487656377982818f, 11.124794668243776f,
+        -1.249000902703301e-16f, 0.0f, 5.551115123125783e-17f, 1.0f
+        );
 
     cv::Mat GetRotMatFromStereoProj(cv::Mat stProj);
     cv::Mat stereoRotation;
@@ -1033,14 +1047,14 @@ void CMainApplication::RunMainLoop()
 #ifdef USE_EYETRACKER
         if (tracker.calibrated)
         {
-            tracker.CalcurateGaze(stereoProjection, stereoRotation);
+            tracker.CalcurateGaze(stereoProjection, stereoRotation, stereoTransform);
 
-            //// Change focus
-            //int focus[2];
-            //focus[vr::Eye_Left] = (-20.f / 7.f) * tracker.gazeDepthLen + 280;
-            //focus[vr::Eye_Right] = (-20.f / 7.f) * tracker.gazeDepthLen + 280 + 20;
-            //m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left], false);
-            //m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right], false);
+            // Change focus
+            int focus[2];
+            focus[vr::Eye_Left] = -7.f * tracker.gazeDepthLen + 395;
+            focus[vr::Eye_Right] = -7.f * tracker.gazeDepthLen + 395 + 20;
+            m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left], false);
+            m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right], false);
 
             if (m_measure)
             {

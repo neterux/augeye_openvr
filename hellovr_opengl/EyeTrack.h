@@ -46,7 +46,7 @@ private:
 
 public:
     void Calibrate();
-    void CalcurateGaze(cv::Mat proj[2], cv::Mat rot);
+    void CalcurateGaze(cv::Mat proj[2], cv::Mat rot, cv::Mat trns);
     cv::Point3f GetGazeDepthPt();
     float GetGazeDepthLen();
 };

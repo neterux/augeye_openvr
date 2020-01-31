@@ -120,7 +120,7 @@ void EyeTrack::Calibrate()
     }
 }
 
-void EyeTrack::CalcurateGaze(cv::Mat proj[2], cv::Mat rot)
+void EyeTrack::CalcurateGaze(cv::Mat proj[2], cv::Mat rot, cv::Mat trns)
 {
     std::vector<cv::Vec2f> src_R, src_L;
     {
@@ -137,11 +137,13 @@ void EyeTrack::CalcurateGaze(cv::Mat proj[2], cv::Mat rot)
     if (p(3, 0) != 0)
     {
         p /= p(3, 0);
+        p = cv::Mat(trns * (cv::Mat_<float>(4, 1) << p(0, 0), p(1, 0), p(2, 0), 1.f));
+        p /= p(3, 0);
         gazeDepthPt = (cv::Mat_<float>(3, 1) << p(0, 0), p(1, 0), p(2, 0));
 
         gazeDepthLen = gazeDepthPt.at<float>(2, 0);
         //gazeDepthLen = cv::Mat(rot * gazeDepthPt).at<float>(2, 0);
-        // std::cout << "Depth: " << gazeDepthLen << std::endl;
+        //std::cout << "Depth: " << gazeDepthLen << std::endl;
     }
 }
 
