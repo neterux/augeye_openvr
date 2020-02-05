@@ -11,7 +11,8 @@ public:
     int GetWidth() const;
     int GetHeight() const;
     char* GetImagePtr();
-    void SetFocus(int value, bool bAddition);
+    void SetFocus(int value);
+    int GetFocus();
     int GetId() const;
 
 private:

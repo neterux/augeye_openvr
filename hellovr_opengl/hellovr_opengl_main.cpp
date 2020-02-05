@@ -28,6 +28,8 @@
 
 // Additonal codes
 #include <Windows.h>
+#include <mmsystem.h>
+#include <random>
 #include <opencv2/opencv.hpp>
 #include "uEyeCamera.h"
 #include "pupil.h"
@@ -94,7 +96,7 @@ void GetPupil_exit() {
 class Csv
 {
 private:
-    const std::string PATH = "D:\\Developing\\sawai\\calibration\\outer\\gaze";
+    const std::string PATH = "D:\\Developing\\sawai\\calibration\\outer\\result\\";
 
     std::ofstream* ofs;
     int count;
@@ -105,14 +107,24 @@ public:
         , ofs(nullptr)
     {};
 
-    void Csv::Open()
+    void Csv::Open(std::string name)
     {
-        ofs = new std::ofstream(PATH + std::to_string(count) + ".csv");
+        ofs = new std::ofstream(PATH + name + std::to_string(count) + ".csv");
     }
 
-    void Csv::WriteGaze(cv::Point3f g)
+    void Csv::Write3dVec(cv::Point3f vec)
     {
-        *ofs << g.x << "," << g.y << "," << g.z << std::endl;
+        *ofs << vec.x << "," << vec.y << "," << vec.z << std::endl;
+    }
+
+    void Csv::WriteFloat(float num)
+    {
+        *ofs << num << std::endl;
+    }
+
+    void Csv::WriteInt(int num)
+    {
+        *ofs << num << std::endl;
     }
 
     void Csv::Close()
@@ -349,10 +361,9 @@ private: // OpenGL bookkeeping
     EyeTrack tracker;
 
     bool m_measure;
-    Csv m_csv;
 #endif // USE_EYETRACKER
 
-    cv::Mat cam_mat = (cv::Mat_<float>(3, 3) << 
+    cv::Mat cam_mat = (cv::Mat_<float>(3, 3) <<
         1173.707857f, 0.f, 1025.894071f, 0.f, 1171.142857f, 1027.8555f, 0.f, 0.f, 1.f
         );
     cv::Mat dist_coeffs = (cv::Mat_<float>(8, 1) <<
@@ -386,10 +397,10 @@ private: // OpenGL bookkeeping
             )
     };
     cv::Mat stereoTransform = (cv::Mat_<float>(4, 4) <<
-        0.9690516151299597f, 0.006095427141919074f, -0.08110809076829564f, 1.798335537876599f,
-        -0.01204326353822742f, 0.9840521082467288f, 0.006548634379593075f, -0.3661739366694684f,
-        -0.11356185011600196f, 0.06314522988791935f, 0.5487656377982818f, 11.124794668243776f,
-        -1.249000902703301e-16f, 0.0f, 5.551115123125783e-17f, 1.0f
+        1.0379056013658339f, -0.0014851937319327539f, -0.08748113246561594f, 1.4982853914733463f,
+        -0.016944121981883716f, 0.9725778802540105f, 0.03509527086065493f, -0.9022018740122033f,
+        -0.15439319843106372f, 0.017215067534370066f, 0.6049124193939417f, 9.766183570896013f,
+        5.551115123125783e-17f, -1.3877787807814457e-17f, 0.0f, 1.0f
         );
 
     cv::Mat GetRotMatFromStereoProj(cv::Mat stProj);
@@ -902,24 +913,6 @@ bool CMainApplication::HandleInput()
             {
                 m_eye = vr::Eye_Right;
             }
-            if (sdlEvent.key.keysym.sym == SDLK_UP)
-            {
-                m_vision[m_eye].SetFocus(5, true);
-            }
-            if (sdlEvent.key.keysym.sym == SDLK_DOWN)
-            {
-                m_vision[m_eye].SetFocus(-5, true);
-            }
-            if (sdlEvent.key.keysym.sym == SDLK_o)
-            {
-                m_vision[vr::Eye_Left].SetFocus(169, false);
-                m_vision[vr::Eye_Right].SetFocus(150, false);
-            }
-            if (sdlEvent.key.keysym.sym == SDLK_p)
-            {
-                m_vision[vr::Eye_Left].SetFocus(200, false);
-                m_vision[vr::Eye_Right].SetFocus(181, false);
-            }
             if (sdlEvent.key.keysym.sym == SDLK_i)
             {
                 m_switch = !m_switch;
@@ -1008,6 +1001,11 @@ bool CMainApplication::HandleInput()
     return bRet;
 }
 
+inline float normDistFunction(float x, float mu, float sig)
+{
+    return exp(-1.f * pow(x - mu, 2) / (2.f * sig * sig)) / sqrtf(2.f * M_PI * sig * sig);
+}
+
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
@@ -1018,16 +1016,40 @@ void CMainApplication::RunMainLoop()
     SDL_StartTextInput();
     SDL_ShowCursor( SDL_DISABLE );
 
-#ifdef USE_EYETRACKER
-    std::thread t_eyetrack_L(GetPupil, std::ref(tracker.mtx), vr::Eye_Left, std::ref(tracker.pupilCenterPt[vr::Eye_Left]));
-    std::thread t_eyetrack_R(GetPupil, std::ref(tracker.mtx), vr::Eye_Right, std::ref(tracker.pupilCenterPt[vr::Eye_Right]));
-#endif // USE_EYETRACKER
-
     // fps
     unsigned int baseTime = SDL_GetTicks();
     int frameCount = 0;
 
+#ifdef USE_EYETRACKER
+    std::thread t_eyetrack_L(GetPupil, std::ref(tracker.mtx), vr::Eye_Left, std::ref(tracker.pupilCenterPt[vr::Eye_Left]));
+    std::thread t_eyetrack_R(GetPupil, std::ref(tracker.mtx), vr::Eye_Right, std::ref(tracker.pupilCenterPt[vr::Eye_Right]));
+
     unsigned int startTime = 0;
+    unsigned int clockTime = 0;
+    unsigned int duration = 0;
+
+    int target = 0;
+
+    int focus[2];
+    float focus_depth[4] =
+    {
+        16.447651594439904f, 22.891151401869156f, 28.828485039370076f, 32.99119197475203f
+    };
+    float focus_error[4] =
+    {
+        0.26318130172019366f, 0.760349430312721f, 1.3575222741862425f, 1.6228205833299962f
+    };
+    float curve_scale[3] = { 0.06806059249703635f, -8.777491535057901f, 395.79979702674603f };
+
+    Csv gaze_csv;
+    Csv focus_csv[2];
+    Csv target_csv;
+    Csv time_csv;
+
+    bool b_swiched = false;
+
+    std::random_device rnd;
+#endif // USE_EYETRACKER
 
     while ( !bQuit )  // Main loop
     {
@@ -1048,14 +1070,33 @@ void CMainApplication::RunMainLoop()
         if (tracker.calibrated)
         {
             tracker.CalcurateGaze(stereoProjection, stereoRotation, stereoTransform);
+            cv::Point3f gazePt = tracker.GetGazeDepthPt();
+            float gazeDepth = tracker.GetGazeDepthLen();
 
             // Change focus
-            int focus[2];
-            focus[vr::Eye_Left] = -7.f * tracker.gazeDepthLen + 395;
-            focus[vr::Eye_Right] = -7.f * tracker.gazeDepthLen + 395 + 20;
-            m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left], false);
-            m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right], false);
+            focus[vr::Eye_Right] = curve_scale[2] + curve_scale[1] * gazeDepth + curve_scale[0] * gazeDepth * gazeDepth;
+            focus[vr::Eye_Left] = focus[vr::Eye_Right] - 20;
+#define USE_DEPTHSNAP
+#ifdef USE_DEPTHSNAP
+            float prob = 0.0001f;
+            for (int i = 0; i < 4; i++)
+            {
+                float fx = normDistFunction(gazeDepth, focus_depth[i], focus_error[i]);
+                if (prob < fx)
+                {
+                    prob = fx;
+                    focus[vr::Eye_Right] = curve_scale[2] + curve_scale[1] * focus_depth[i] + curve_scale[0] * focus_depth[i] * focus_depth[i];
+                    focus[vr::Eye_Left] = focus[vr::Eye_Right] - 20;
+                }
+            }
+#endif // USE_DEPTHSNAP
+            m_vision[vr::Eye_Left].SetFocus(focus[vr::Eye_Left]);
+            m_vision[vr::Eye_Right].SetFocus(focus[vr::Eye_Right]);
 
+//#define TIMEMEAS
+//#define SWITCHMEAS
+#define EXPMEAS
+#ifdef TIMEMEAS
             if (m_measure)
             {
                 if (startTime == 0)
@@ -1068,11 +1109,11 @@ void CMainApplication::RunMainLoop()
                             startTime = SDL_GetTicks();
                             trial++;
                         }
-
+                        
                         if (startTime == 0)
                             throw "Exception: cannot take startTime";
-                        
-                        m_csv.Open();
+
+                        gaze_csv.Open("gaze");
                         std::cout << "Start measure" << std::endl;
                         Beep(440, 161);
                     }
@@ -1089,11 +1130,12 @@ void CMainApplication::RunMainLoop()
                 }
                 else
                 {
-                    m_csv.WriteGaze(tracker.GetGazeDepthPt());
+                    gaze_csv.Write3dVec(gazePt);
+                    //gaze_csv.WriteFloat(gazeDepth);
 
                     if (currentTime - startTime > 5000) // 5 s
                     {
-                        m_csv.Close();
+                        gaze_csv.Close();
                         std::cout << "End measure" << std::endl;
                         Beep(554, 128);
 
@@ -1102,6 +1144,126 @@ void CMainApplication::RunMainLoop()
                     }
                 }
             }
+#endif // TIMEMEAS
+#ifdef SWITCHMEAS
+            if (m_measure)
+            {
+                if (!b_swiched)
+                {
+                    gaze_csv.Open("gaze");
+                    focus_csv[vr::Eye_Left].Open("focus_l");
+                    focus_csv[vr::Eye_Right].Open("focus_r");
+                    std::cout << "Start measure" << std::endl;
+                    Beep(440, 161);
+
+                    b_swiched = true;
+                }
+                else
+                {
+                    gaze_csv.Write3dVec(gazePt);
+                    focus_csv[vr::Eye_Left].WriteInt(m_vision[vr::Eye_Left].GetFocus());
+                    focus_csv[vr::Eye_Right].WriteInt(m_vision[vr::Eye_Right].GetFocus());
+                }
+            }
+            if (!m_measure && b_swiched)
+            {
+                gaze_csv.Close();
+                focus_csv[vr::Eye_Left].Close();
+                focus_csv[vr::Eye_Right].Close();
+                std::cout << "End measure" << std::endl;
+                Beep(554, 128);
+
+                b_swiched = false;
+            }
+#endif // SWITCHMEAS
+#ifdef EXPMEAS
+            if (m_measure)
+            {
+                if (startTime == 0 && !b_swiched)
+                {
+                    b_swiched = true;
+
+                    try
+                    {
+                        int trial = 0;
+                        while (startTime == 0 && trial < 10)
+                        {
+                            startTime = SDL_GetTicks();
+                            trial++;
+                        }
+
+                        if (startTime == 0)
+                            throw "Exception: cannot take startTime";
+
+                        gaze_csv.Open("gaze");
+                        focus_csv[vr::Eye_Left].Open("focus_l");
+                        focus_csv[vr::Eye_Right].Open("focus_r");
+                        target_csv.Open("target");
+                        time_csv.Open("time");
+
+                        std::cout << "Start measure" << std::endl;
+                        Beep(440, 161);
+                    }
+                    catch (char* str)
+                    {
+                        std::cout << str << std::endl;
+                        Beep(440, 161);
+                        Beep(440, 161);
+                        Beep(440, 161);
+
+                        startTime = 0;
+                        m_measure = false;
+                    }
+                }
+                else
+                {
+                    if (currentTime - clockTime > duration)
+                    {
+                        PlaySound(NULL, NULL, 0);
+                        duration = (rnd() % 5 + 1) * 1000;
+
+                        int new_target = target;
+                        while (target == new_target)
+                        {
+                            new_target = rnd() % 4;
+                        }
+                        target = new_target;
+                        std::string file = "D:\\Developing\\sawai\\sound\\lady\\" + std::to_string(target + 1) + ".wav";
+                        PlaySound(file.c_str(), NULL, SND_FILENAME | SND_ASYNC);
+
+                        clockTime = SDL_GetTicks();
+                    }
+
+                    gaze_csv.Write3dVec(gazePt);
+                    focus_csv[vr::Eye_Left].WriteInt(m_vision[vr::Eye_Left].GetFocus());
+                    focus_csv[vr::Eye_Right].WriteInt(m_vision[vr::Eye_Right].GetFocus());
+                    target_csv.WriteFloat(focus_depth[target]);
+                    time_csv.WriteInt(currentTime - startTime);
+
+                    if (currentTime - startTime > 120000)
+                    {
+                        m_measure = false;
+                    }
+                }
+            }
+            if (!m_measure && b_swiched)
+            {
+                gaze_csv.Close();
+                focus_csv[vr::Eye_Left].Close();
+                focus_csv[vr::Eye_Right].Close();
+                target_csv.Close();
+                time_csv.Close();
+
+                std::cout << "End measure" << std::endl;
+                Beep(554, 128);
+
+                duration = 0;
+                clockTime = 0;
+
+                b_swiched = false;
+                startTime = 0;
+            }
+#endif // EXPMEAS
         }
         else
         {
@@ -1950,7 +2112,7 @@ void CMainApplication::RenderScene( vr::Hmd_Eye nEye )
         glUniformMatrix3fv(m_nSceneMVMatLocation, 1, GL_FALSE, modelview.get());
 
         Matrix4 projection = m_mat4Projection[nEye];
-        // projection.identity(); 
+        // projection.identity();
         glUniformMatrix4fv(m_nSceneProjMatLocation, 1, GL_FALSE, projection.get());
 
         glUniform1i(m_nCameraTextureLocation, 0);

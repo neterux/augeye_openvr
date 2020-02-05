@@ -71,12 +71,9 @@ char* uEyeCamera::GetImagePtr()
     return _image;
 }
 
-void uEyeCamera::SetFocus(int value, bool bAddition)
+void uEyeCamera::SetFocus(int value)
 {
-    if (bAddition)
-        focus += value;
-    else
-        focus = value;
+    focus = value;
     if (focus > (int)focMax) focus = focMax;
     if (focus < (int)focMin) focus = focMin;
 
@@ -97,6 +94,12 @@ void uEyeCamera::SetFocus(int value, bool bAddition)
             std::cout << "uEye Error - code " << ret << ": " << myErrorBuffer << std::endl;
         }
     }
+}
+
+int uEyeCamera::GetFocus()
+{
+    is_Focus(_camId, FOC_CMD_GET_MANUAL_FOCUS, &focus, 4);
+    return focus;
 }
 
 int uEyeCamera::GetId() const

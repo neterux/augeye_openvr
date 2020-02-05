@@ -58,7 +58,7 @@ void EyeTrack::Calibrate()
                 std::cout << "mean: " << _mean << std::endl;
                 std::cout << "std:  " << cv::Point2f(sqrt(_var.at<float>(0, 0)), sqrt(_var.at<float>(0, 1))) << std::endl;
 
-                //TODO: 4‰ñ•ª‚·‚×‚Ä‚ð‡‚í‚¹‚Ä•W€•Î·‚ð‹‚ß‚é
+                //TODO: 4å›žåˆ†ã™ã¹ã¦ã‚’åˆã‚ã›ã¦æ¨™æº–åå·®ã‚’æ±‚ã‚ã‚‹
                 //m_varStack[nEye][0].push_back(cv::Mat(m_pupilPtStack[nEye]).col(0) - _mean.at<float>(0, 0));
                 //m_varStack[nEye][1].push_back(cv::Mat(m_pupilPtStack[nEye]).col(1) - _mean.at<float>(0, 1));
 
